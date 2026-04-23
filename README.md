@@ -4,8 +4,14 @@
 
 **Run AI agents in secure, scalable Cloud PCs.**
 
+
+<div align="center">
+  <img src="./docs/readmepic.png" alt="Windows 365 for Agents architecture" width="800"/>
+</div>
+
+
 [![Status](https://img.shields.io/badge/status-public%20preview-blue)](https://learn.microsoft.com/en-us/windows-365/public-preview)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-CC--BY--4.0-blue.svg)](./LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![MCP](https://img.shields.io/badge/protocol-MCP-purple)](https://modelcontextprotocol.io)
 
@@ -29,6 +35,54 @@ Built on the [Windows 365](https://learn.microsoft.com/en-us/windows-365/overvie
 - 👁️ **Real-time screen sharing** — Human-in-the-loop observation and takeover via WebRTC
 - 🏢 **Enterprise-grade** — Conditional Access, compliance, audit trails built in
 - ⚡ **Pool-based scaling** — Provision pools of Cloud PCs; agents request capability, not specific machines
+
+## Documentation
+
+| Topic | Description |
+|-------|-------------|
+| [Overview](./docs/overview.md) | What is Windows 365 for Agents, platform capabilities, supported regions |
+| [Quick Start](./docs/quickstart.md) | Step-by-step guide: prerequisites → first agent session |
+| [Architecture](./docs/architecture.md) | Four-plane architecture: Create, Get, Do, See |
+| [Session Lifecycle](./docs/sessions.md) | Prepare → Acquire → Connect → Act → Release |
+| [Cloud PC Pools](./docs/cloud-pc-pools.md) | Pool concepts, status, management |
+| [Provisioning](./docs/provisioning.md) | Create and manage provisioning policies in Intune |
+| [API Reference](./docs/api-reference.md) | Session checkout/checkin, MCP, screen sharing endpoints |
+| [MCP Tools](./docs/mcp-tools.md) | All 37 built-in tools: desktop, browser, accessibility |
+| [Screen Sharing](./docs/screen-sharing.md) | Human-in-the-loop observation and shared control |
+| [Security](./docs/security.md) | Identity, Entra integration, Zero Trust, authentication |
+| [FAQ](./docs/faq.md) | Common questions and troubleshooting |
+
+## Architecture at a Glance
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     Entry Points                            │
+│  ┌──────────┐   ┌──────────────┐   ┌──────────────────┐    │
+│  │  Chat UX │   │  Agent App   │   │  IT Admin Portal │    │
+│  └────┬─────┘   └──────┬───────┘   └────────┬─────────┘    │
+│       │                │                     │              │
+├───────┼────────────────┼─────────────────────┼──────────────┤
+│       │                │                     │              │
+│       │         ┌──────▼───────┐    ┌────────▼──────────┐   │
+│       │         │ Computer-Get │    │  Computer-Create   │   │
+│       │         │  (Sessions)  │    │  (Provisioning)    │   │
+│       │         │  Check-out   │    │  Cloud PC Pools    │   │
+│       │         │  Check-in    │    │  Policy & Billing  │   │
+│       │         └──────┬───────┘    └───────────────────┘   │
+│       │                │                                    │
+│  ┌────▼────────────────▼────────┐                           │
+│  │        Cloud PC (VM)         │                           │
+│  │  ┌────────────┐ ┌─────────┐  │                           │
+│  │  │Computer-Do │ │Computer-│  │                           │
+│  │  │ (MCP Tools)│ │  See    │  │                           │
+│  │  │ 37 tools   │ │(Screen  │  │                           │
+│  │  │ Desktop,   │ │ Share)  │  │                           │
+│  │  │ Browser,   │ │ WebRTC  │  │                           │
+│  │  │ A11y       │ │         │  │                           │
+│  │  └────────────┘ └─────────┘  │                           │
+│  └──────────────────────────────┘                           │
+└─────────────────────────────────────────────────────────────┘
+```
 
 ## Quick Start
 
@@ -114,54 +168,6 @@ httpx.delete(
     params={"api-version": "2.0"},
     headers={"Authorization": f"Bearer {TOKEN}"},
 )
-```
-
-## Documentation
-
-| Topic | Description |
-|-------|-------------|
-| [Overview](./docs/overview.md) | What is Windows 365 for Agents, platform capabilities, supported regions |
-| [Quick Start](./docs/quickstart.md) | Step-by-step guide: prerequisites → first agent session |
-| [Architecture](./docs/architecture.md) | Four-plane architecture: Create, Get, Do, See |
-| [Session Lifecycle](./docs/sessions.md) | Prepare → Acquire → Connect → Act → Release |
-| [Cloud PC Pools](./docs/cloud-pc-pools.md) | Pool concepts, status, management |
-| [Provisioning](./docs/provisioning.md) | Create and manage provisioning policies in Intune |
-| [API Reference](./docs/api-reference.md) | Session checkout/checkin, MCP, screen sharing endpoints |
-| [MCP Tools](./docs/mcp-tools.md) | All 37 built-in tools: desktop, browser, accessibility |
-| [Screen Sharing](./docs/screen-sharing.md) | Human-in-the-loop observation and shared control |
-| [Security](./docs/security.md) | Identity, Entra integration, Zero Trust, authentication |
-| [FAQ](./docs/faq.md) | Common questions and troubleshooting |
-
-## Architecture at a Glance
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     Entry Points                            │
-│  ┌──────────┐   ┌──────────────┐   ┌──────────────────┐    │
-│  │  Chat UX │   │  Agent App   │   │  IT Admin Portal │    │
-│  └────┬─────┘   └──────┬───────┘   └────────┬─────────┘    │
-│       │                │                     │              │
-├───────┼────────────────┼─────────────────────┼──────────────┤
-│       │                │                     │              │
-│       │         ┌──────▼───────┐    ┌────────▼──────────┐   │
-│       │         │ Computer-Get │    │  Computer-Create   │   │
-│       │         │  (Sessions)  │    │  (Provisioning)    │   │
-│       │         │  Check-out   │    │  Cloud PC Pools    │   │
-│       │         │  Check-in    │    │  Policy & Billing  │   │
-│       │         └──────┬───────┘    └───────────────────┘   │
-│       │                │                                    │
-│  ┌────▼────────────────▼────────┐                           │
-│  │        Cloud PC (VM)         │                           │
-│  │  ┌────────────┐ ┌─────────┐  │                           │
-│  │  │Computer-Do │ │Computer-│  │                           │
-│  │  │ (MCP Tools)│ │  See    │  │                           │
-│  │  │ 37 tools   │ │(Screen  │  │                           │
-│  │  │ Desktop,   │ │ Share)  │  │                           │
-│  │  │ Browser,   │ │ WebRTC  │  │                           │
-│  │  │ A11y       │ │         │  │                           │
-│  │  └────────────┘ └─────────┘  │                           │
-│  └──────────────────────────────┘                           │
-└─────────────────────────────────────────────────────────────┘
 ```
 
 ## Getting Help
