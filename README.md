@@ -170,6 +170,12 @@ httpx.delete(
 )
 ```
 
+## Samples
+
+| Sample | Language | Description |
+|--------|----------|-------------|
+| [W365A Playground Agent](./W365A-Playground-Agent/) | C# / .NET 8 | Teams-connected agent with Cloud PC Computer Use, screenshot forwarding, and MCP tool integration |
+
 ## Getting Help
 
 - 📖 [Full documentation](./docs/)
