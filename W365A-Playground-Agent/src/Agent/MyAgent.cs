@@ -22,8 +22,18 @@ namespace Microsoft.W365APlaygroundAgent.Agent
         private const string AgentHireMessage = "Thank you for hiring me! Looking forward to assisting you in your professional journey!";
         private const string AgentFarewellMessage = "Thank you for your time, I enjoyed working with you.";
 
-        // Non-interpolated raw string so {{ToolName}} placeholders are preserved as literal text.
-        // {userName} is the only dynamic token and is injected via string.Replace in GetAgentInstructions.
+        // System instructions sent to the model on every turn.
+        //
+        // The {{toolName}} placeholders are NOT C# string interpolation — they're literal text
+        // that the model interprets as references to specific tools by name. This is how you
+        // encourage the model to use particular tools for particular intents (e.g. weather
+        // questions → WeatherLookupTool). The placeholders should match the function names
+        // registered via AIFunctionFactory.Create plus the MCP tool names from the platform.
+        //
+        // {userName} (single braces, no {{) is the only dynamically-substituted token; it's
+        // replaced via GetAgentInstructions with the sanitized display name from
+        // Activity.From.Name. The raw string ("""...""") is non-interpolated so {{...}} stays
+        // literal at compile time.
         private static readonly string AgentInstructionsTemplate = """
         You will speak like a friendly and professional virtual assistant.
 

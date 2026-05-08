@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-using Microsoft.W365APlaygroundAgent.ComputerUse.Models;
 using Microsoft.Agents.Builder;
 using Microsoft.Agents.Core.Models;
 using Microsoft.Extensions.AI;
@@ -104,7 +103,9 @@ public sealed class ResponsesOrchestrator
 
         history.Add(MakeUserTextMessage(userMessage));
 
-        // Agentic tool-call loop: call model → stream text → execute tools → repeat until no tool calls.
+        // The agent loop — the canonical pattern: call model → stream text → execute any tool
+        // calls the model requested → repeat until the model returns a message with no further
+        // tool calls. Each iteration sends the full history (model is stateless).
         while (true)
         {
             var response = await CallModelAsync(history, instructions, toolDefs, cancellationToken);
@@ -459,4 +460,9 @@ public sealed class ResponsesOrchestrator
             call_id = callId,
             output
         });
+
+    /// <summary>The subset of the OpenAI Responses API response that we deserialise. Other fields are ignored.</summary>
+    private sealed record ResponsesResponse(
+        [property: JsonPropertyName("id")] string Id,
+        [property: JsonPropertyName("output")] List<JsonElement> Output);
 }

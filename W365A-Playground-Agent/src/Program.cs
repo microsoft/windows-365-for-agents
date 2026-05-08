@@ -21,46 +21,48 @@ using System.Reflection;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Setup Aspire service defaults, including OpenTelemetry, Service Discovery, Resilience, and Health Checks
+// ───── Telemetry & infrastructure ─────
+// Aspire-style OpenTelemetry setup (metrics on by default; tracing block is opt-in).
 builder.ConfigureOpenTelemetry();
-
 builder.Configuration.AddUserSecrets(Assembly.GetExecutingAssembly());
 builder.Services.AddControllers();
 builder.Services.AddHttpClient("WebClient", client => client.Timeout = TimeSpan.FromSeconds(600));
 builder.Services.AddHttpContextAccessor();
 builder.Logging.AddConsole();
 
-// **********  Configure A365 Services **********
-// Add A365 tracing with Agent Framework integration
+// ───── Microsoft Agent 365 (A365) services ─────
+// A365 tracing wires the platform's blueprint/tenant baggage into OTel so traces correlate
+// with the A365 service-side observability backend.
 builder.AddA365Tracing(config =>
 {
     config.WithAgentFramework();
 });
 
-// Add A365 Tooling Server integration
+// A365 MCP tool registration: lets the agent enumerate and invoke MCP servers declared in
+// ToolingManifest.json (e.g. mcp_W365ComputerUse for Cloud PC computer use).
 builder.Services.AddSingleton<IMcpToolRegistrationService, McpToolRegistrationService>();
 builder.Services.AddSingleton<IMcpToolServerConfigurationService, McpToolServerConfigurationService>();
-// **********  END Configure A365 Services **********
 
-// Add AspNet token validation
+// ───── Auth & storage ─────
+// JWT validation for incoming Bot Framework / agentic tokens (config: TokenValidation:*).
 builder.Services.AddAgentAspNetAuthentication(builder.Configuration);
 
-// Register IStorage.  For development, MemoryStorage is suitable.
-// For production Agents, persisted storage should be used so
-// that state survives Agent restarts, and operate correctly
-// in a cluster of Agent instances.
+// Conversation state. MemoryStorage is fine for development; for production use a durable
+// store (CosmosDbPartitionedStorage, BlobsStorage, etc.) so state survives restarts and
+// works in multi-instance deployments.
 builder.Services.AddSingleton<IStorage, MemoryStorage>();
 
-// Add AgentApplicationOptions from config.
+// ───── Agent + orchestrator ─────
+// Apply AgentApplication options from appsettings.json (auth handlers, etc.).
 builder.AddAgentApplicationOptions();
 
-// Add the bot (which is transient)
+// The agent itself. Transient: a new instance per turn.
 builder.AddAgent<MyAgent>();
 
-// Register the Responses API orchestrator (singleton — holds per-conversation history)
+// Custom Responses-API orchestrator. Singleton: holds per-conversation history in memory.
 builder.Services.AddSingleton<ResponsesOrchestrator>();
 
-// Uncomment to add transcript logging middleware to log all conversations to files
+// To enable transcript logging, uncomment below. See SETUP.md for details.
 // builder.Services.AddSingleton<Microsoft.Agents.Builder.IMiddleware[]>([new TranscriptLoggerMiddleware(new FileTranscriptLogger())]);
 
 var app = builder.Build();
