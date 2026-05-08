@@ -88,11 +88,11 @@ public sealed class ResponsesOrchestrator
         state.LastAccessed = DateTime.UtcNow;
         var history = state.History;
         // Deduplicate tools by name, taking the first occurrence (manifest order). When multiple MCP
-        // servers expose a tool with the same name, later occurrences are silently dropped. Known cases:
-        //   - "getFileOrFolderMetadataByUrl": mcp_OneDriveRemoteServer (kept) vs mcp_SharePointRemoteServer (dropped)
-        //   - "GetDocumentContent": mcp_WordServer (kept) vs mcp_ExcelServer (dropped)
-        // Server-name prefixing (Option A) would require per-server loading and a custom AIFunction
-        // wrapper in MyAgent.cs — the server origin is not available here after GetMcpToolsAsync flattens
+        // servers expose a tool with the same name, later occurrences are silently dropped — for
+        // example, mcp_OneDriveRemoteServer and mcp_SharePointRemoteServer both expose
+        // "getFileOrFolderMetadataByUrl"; whichever appears first in the manifest wins.
+        // Server-name prefixing would require per-server loading and a custom AIFunction wrapper in
+        // MyAgent.cs — the server origin is not available here after GetMcpToolsAsync flattens
         // the tool list.
         var toolsByName = tools.OfType<AIFunction>()
             .GroupBy(t => t.Name)

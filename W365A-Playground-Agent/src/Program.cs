@@ -89,7 +89,7 @@ app.MapGet("/api/health", () => Results.Ok(new { status = "healthy", timestamp =
 
 if (app.Environment.IsDevelopment() || app.Environment.EnvironmentName == "Playground")
 {
-    app.MapGet("/", () => "Agent Framework Example Weather Agent");
+    app.MapGet("/", () => "W365A Playground Agent");
     app.UseDeveloperExceptionPage();
     app.MapControllers().AllowAnonymous();
 

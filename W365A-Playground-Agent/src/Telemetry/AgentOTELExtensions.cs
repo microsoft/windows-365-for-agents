@@ -62,7 +62,7 @@ namespace Microsoft.W365APlaygroundAgent.Telemetry
                 .ConfigureResource(r => r
                 .Clear()
                 .AddService(
-                    serviceName: "A365.AgentFramework",
+                    serviceName: "W365APlaygroundAgent",
                     serviceVersion: "1.0.0",
                     serviceInstanceId: Environment.MachineName)
                 .AddAttributes(new Dictionary<string, object>
@@ -86,10 +86,10 @@ namespace Microsoft.W365APlaygroundAgent.Telemetry
                     /* Disabled — re-enable to capture ASP.NET Core and HTTP client traces.
                     tracing.AddSource(builder.Environment.ApplicationName)
                         .AddSource(
-                            "A365.AgentFramework",
+                            "W365APlaygroundAgent",
                             "Microsoft.Agents.Builder",
                             "Microsoft.Agents.Hosting",
-                            "A365.AgentFramework.MyAgent",
+                            "W365APlaygroundAgent.MyAgent",
                             "Microsoft.AspNetCore",
                             "System.Net.Http"
                         );

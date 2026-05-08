@@ -68,7 +68,10 @@ namespace Microsoft.W365APlaygroundAgent.Agent
         // Setup reusable auto sign-in handlers for user authorization (configurable via appsettings.json)
         private readonly string? AgenticAuthHandlerName;
         private readonly string? OboAuthHandlerName;
-        // Temp
+        // Caches MCP tools per user (keyed by user.toolCacheKey resolved in GetToolCacheKey).
+        // MCP tool enumeration is expensive, so we resolve once per user and reuse for the
+        // lifetime of the process. For production with many distinct users, swap for a
+        // size-bounded LRU.
         private static readonly ConcurrentDictionary<string, List<AITool>> _agentToolCache = new();
 
         /// <summary>
