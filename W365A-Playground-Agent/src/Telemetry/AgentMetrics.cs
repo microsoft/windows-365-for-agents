@@ -110,15 +110,20 @@ namespace Microsoft.W365APlaygroundAgent.Telemetry
             }
         }
 
-        public static Task InvokeObservedAgentOperation(string operationName, ITurnContext context, Func<Task> func)
+        public static async Task InvokeObservedAgentOperation(string operationName, ITurnContext context, Func<Task> func)
         {
             MessageProcessedCounter.Add(1);
             // Init the activity for observability
             var activity = InitializeMessageHandlingActivity(operationName, context);
             var routeStopwatch = Stopwatch.StartNew();
+            bool success = false;
             try
             {
-                return func();
+                // Must await — returning func() bypasses the catch/finally for any exception
+                // thrown after the first await point inside func, and finalises the activity
+                // before the operation actually completes.
+                await func().ConfigureAwait(false);
+                success = true;
             }
             catch (Exception ex)
             {
@@ -134,7 +139,7 @@ namespace Microsoft.W365APlaygroundAgent.Telemetry
             finally
             {
                 routeStopwatch.Stop();
-                FinalizeMessageHandlingActivity(activity, context, routeStopwatch.ElapsedMilliseconds, true);
+                FinalizeMessageHandlingActivity(activity, context, routeStopwatch.ElapsedMilliseconds, success);
             }
         }
     }

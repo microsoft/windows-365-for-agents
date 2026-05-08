@@ -196,19 +196,6 @@ public static class AspNetExtensions
                     }
 
                     await Task.CompletedTask.ConfigureAwait(false);
-                },
-
-                OnTokenValidated = context =>
-                {
-                    return Task.CompletedTask;
-                },
-                OnForbidden = context =>
-                {
-                    return Task.CompletedTask;
-                },
-                OnAuthenticationFailed = context =>
-                {
-                    return Task.CompletedTask;
                 }
             };
         });

@@ -337,7 +337,7 @@ public sealed class ResponsesOrchestrator
                 var b64 = SearchJsonForBase64(doc.RootElement);
                 if (b64 != null) return (b64, "image/jpeg"); // V1 JSON path: was JPEG
             }
-            catch { }
+            catch (JsonException) { /* Not JSON; no embedded image to extract. */ }
         }
         if (result is JsonElement je)
         {
@@ -385,7 +385,7 @@ public sealed class ResponsesOrchestrator
     /// Arrays and objects are preserved as <see cref="JsonElement"/> (via <c>Clone</c>) so MCP tools
     /// receive the correct runtime types — e.g. <c>commands:["whoami"]</c> stays a list, not a string.
     /// </summary>
-    private static Dictionary<string, object?> ParseArguments(string json)
+    private Dictionary<string, object?> ParseArguments(string json)
     {
         var result = new Dictionary<string, object?>();
         try
@@ -404,7 +404,10 @@ public sealed class ResponsesOrchestrator
                     _ => prop.Value.Clone()
                 };
         }
-        catch { }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(ex, "Failed to parse tool arguments as JSON. Tool will be invoked with empty arguments.");
+        }
         return result;
     }
 
