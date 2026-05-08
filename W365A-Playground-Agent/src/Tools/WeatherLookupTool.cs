@@ -19,7 +19,6 @@ namespace Microsoft.W365APlaygroundAgent.Tools
     public class WeatherLookupTool(ITurnContext turnContext, IConfiguration configuration, ILogger<WeatherLookupTool> logger)
     {
         private const string OpenWeatherKeyConfigPath = "OpenWeatherApiKey";
-        private OpenWeatherMapService? _serviceCache;
 
         [Description("Retrieves the Current weather for a location, location is a city name")]
         public async Task<WeatherRoot?> GetCurrentWeatherForLocation(string location, string state)
@@ -85,12 +84,11 @@ namespace Microsoft.W365APlaygroundAgent.Tools
         }
 
         /// <summary>
-        /// Lazily creates the OpenWeather client. Throws a clear error if the API key isn't configured —
+        /// Constructs an OpenWeather client. Throws a clear error if the API key isn't configured —
         /// for a sample, an early diagnostic beats a confusing API failure later.
         /// </summary>
         private OpenWeatherMapService GetService()
         {
-            if (_serviceCache is not null) return _serviceCache;
             var apiKey = configuration[OpenWeatherKeyConfigPath];
             if (string.IsNullOrEmpty(apiKey))
             {
@@ -100,7 +98,7 @@ namespace Microsoft.W365APlaygroundAgent.Tools
                     $"or in appsettings.json / Azure App Settings (production). " +
                     $"Get a free key at https://openweathermap.org/price.");
             }
-            return _serviceCache = new OpenWeatherMapService(apiKey);
+            return new OpenWeatherMapService(apiKey);
         }
 
         /// <summary>

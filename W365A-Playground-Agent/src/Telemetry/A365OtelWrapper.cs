@@ -58,7 +58,7 @@ namespace Microsoft.W365APlaygroundAgent.Telemetry
                     agentId = Utility.ResolveAgentIdentity(turnContext, await authSystem.GetTurnTokenAsync(turnContext, authHandlerName));
             }
             agentId = agentId ?? Guid.Empty.ToString();
-            string? tempTenantId = turnContext?.Activity?.Conversation?.TenantId ?? turnContext?.Activity?.Recipient?.TenantId;
+            string? tempTenantId = turnContext.Activity.Conversation?.TenantId ?? turnContext.Activity.Recipient?.TenantId;
             string tenantId = tempTenantId ?? Guid.Empty.ToString();
 
             return (agentId, tenantId);

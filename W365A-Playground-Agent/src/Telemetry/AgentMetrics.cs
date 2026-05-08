@@ -18,7 +18,7 @@ namespace Microsoft.W365APlaygroundAgent.Telemetry
 
         public static readonly ActivitySource ActivitySource = new(SourceName);
 
-        private static readonly Meter Meter = new ("W365APlaygroundAgent", "1.0.0");
+        private static readonly Meter Meter = new(SourceName, "1.0.0");
 
         public static readonly Counter<long> MessageProcessedCounter = Meter.CreateCounter<long>(
             "agent.messages.processed",
@@ -45,12 +45,15 @@ namespace Microsoft.W365APlaygroundAgent.Telemetry
             "conversations",
             "Number of active conversations");
 
-
-        public static Activity InitializeMessageHandlingActivity(string handlerName, ITurnContext context)
+        /// <summary>
+        /// Starts an OTel activity for a turn handler. Returns null when no listener is attached
+        /// (e.g. tracing disabled), so callers must use null-conditional access.
+        /// </summary>
+        public static Activity? InitializeMessageHandlingActivity(string handlerName, ITurnContext context)
         {
             var activity = ActivitySource.StartActivity(handlerName);
             activity?.SetTag("Activity.Type", context.Activity.Type.ToString());
-            activity?.SetTag("Agent.IsAgentic", context.IsAgenticRequest()); 
+            activity?.SetTag("Agent.IsAgentic", context.IsAgenticRequest());
             activity?.SetTag("Caller.Id", context.Activity.From?.Id);
             activity?.SetTag("Conversation.Id", context.Activity.Conversation?.Id);
             activity?.SetTag("Channel.Id", context.Activity.ChannelId?.ToString());
@@ -64,10 +67,10 @@ namespace Microsoft.W365APlaygroundAgent.Telemetry
                 ["Message.Id"] = context.Activity.Id,
                 ["Message.Text"] = context.Activity.Text
             }));
-            return activity!;
+            return activity;
         }
 
-        public static void FinalizeMessageHandlingActivity(Activity activity, ITurnContext context, long duration,  bool success)
+        public static void FinalizeMessageHandlingActivity(Activity? activity, ITurnContext context, long duration, bool success)
         {
             MessageProcessingDuration.Record(duration,
                     new("Conversation.Id", context.Activity.Conversation?.Id ?? "unknown"),
@@ -77,16 +80,8 @@ namespace Microsoft.W365APlaygroundAgent.Telemetry
                 new("Route.Type", "message_handler"),
                 new("Conversation.Id", context.Activity.Conversation?.Id ?? "unknown"));
 
-            if (success)
-            {
-                activity?.SetStatus(ActivityStatusCode.Ok);
-            }
-            else
-            {
-                activity?.SetStatus(ActivityStatusCode.Error);
-            }
-            activity?.Stop();
-            activity?.Dispose(); 
+            activity?.SetStatus(success ? ActivityStatusCode.Ok : ActivityStatusCode.Error);
+            activity?.Dispose();  // Dispose() calls Stop() internally
         }
 
         public static async Task InvokeObservedHttpOperation(string operationName, Func<Task> func)

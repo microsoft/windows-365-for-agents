@@ -281,7 +281,7 @@ namespace Microsoft.W365APlaygroundAgent.Agent
                 {
                     var userText = turnContext.Activity.Text?.Trim() ?? string.Empty;
 
-                    if (turnContext?.Activity?.Attachments?.Count > 0)
+                    if (turnContext.Activity.Attachments?.Count > 0)
                     {
                         foreach (var attachment in turnContext.Activity.Attachments)
                         {
@@ -292,10 +292,10 @@ namespace Microsoft.W365APlaygroundAgent.Agent
                         }
                     }
 
-                    var tools = await GetToolsAsync(turnContext!, turnState, _toolService, ToolAuthHandlerName);
-                    var conversationKey = turnContext?.Activity?.Conversation?.Id ?? Guid.NewGuid().ToString();
-                    var displayName = turnContext?.Activity?.From?.Name;
-                    await _orchestrator.RunAsync(conversationKey, userText, GetAgentInstructions(displayName), tools, turnContext!, cancellationToken);
+                    var tools = await GetToolsAsync(turnContext, turnState, ToolAuthHandlerName);
+                    var conversationKey = turnContext.Activity.Conversation?.Id ?? Guid.NewGuid().ToString();
+                    var displayName = turnContext.Activity.From?.Name;
+                    await _orchestrator.RunAsync(conversationKey, userText, GetAgentInstructions(displayName), tools, turnContext, cancellationToken);
                 }
                 finally
                 {
@@ -317,9 +317,8 @@ namespace Microsoft.W365APlaygroundAgent.Agent
         /// <summary>
         /// Load tools (local + MCP) for this turn. MCP tools are cached per user session.
         /// </summary>
-        private async Task<IList<AITool>> GetToolsAsync(ITurnContext context, ITurnState turnState, IMcpToolRegistrationService? toolService, string? authHandlerName)
+        private async Task<IList<AITool>> GetToolsAsync(ITurnContext context, ITurnState turnState, string? authHandlerName)
         {
-            AssertionHelpers.ThrowIfNull(_configuration!, nameof(_configuration));
             AssertionHelpers.ThrowIfNull(context, nameof(context));
 
             // Acquire the access token once for this turn — used for MCP tool loading.
@@ -357,7 +356,7 @@ namespace Microsoft.W365APlaygroundAgent.Agent
             _logger.LogInformation("GetToolsAsync: authHandler={Handler}, hasToken={HasToken}, agentId={AgentId}",
                 authHandlerName, !string.IsNullOrEmpty(accessToken), agentId ?? "(null)");
 
-            if (toolService != null && !string.IsNullOrEmpty(agentId))
+            if (!string.IsNullOrEmpty(agentId))
             {
                 try
                 {
@@ -382,7 +381,7 @@ namespace Microsoft.W365APlaygroundAgent.Agent
                             : OboAuthHandlerName ?? AgenticAuthHandlerName ?? string.Empty;
                         var tokenOverride = string.IsNullOrEmpty(authHandlerName) ? accessToken : null;
 
-                        var a365Tools = await toolService.GetMcpToolsAsync(agentId, UserAuthorization, handlerForMcp, context, tokenOverride).ConfigureAwait(false);
+                        var a365Tools = await _toolService.GetMcpToolsAsync(agentId, UserAuthorization, handlerForMcp, context, tokenOverride).ConfigureAwait(false);
 
                         if (a365Tools != null && a365Tools.Count > 0)
                         {
