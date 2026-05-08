@@ -335,14 +335,14 @@ public sealed class ResponsesOrchestrator
             {
                 using var doc = JsonDocument.Parse(s);
                 var b64 = SearchJsonForBase64(doc.RootElement);
-                if (b64 != null) return (b64, "image/jpeg"); // V1 JSON path: was JPEG
+                if (b64 != null) return (b64, "image/jpeg"); // Legacy JSON-string format (W365 MCP V1); image is JPEG.
             }
             catch (JsonException) { /* Not JSON; no embedded image to extract. */ }
         }
         if (result is JsonElement je)
         {
             var b64 = SearchJsonForBase64(je);
-            if (b64 != null) return (b64, "image/jpeg"); // V1 JSON path: was JPEG
+            if (b64 != null) return (b64, "image/jpeg"); // Legacy JSON-string format (W365 MCP V1); image is JPEG.
         }
         return null;
     }

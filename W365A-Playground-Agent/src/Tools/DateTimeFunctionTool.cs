@@ -7,11 +7,7 @@ namespace Microsoft.W365APlaygroundAgent.Tools
 {
     public static class DateTimeFunctionTool
     {
-        [Description("Use this tool to get the current date and time")]
-        public static string getDate(string input)
-        {
-            string date = DateTimeOffset.Now.ToString("D", null);
-            return date;
-        }
+        [Description("Returns the current local date and time as a human-readable string.")]
+        public static string GetCurrentDateTime() => DateTimeOffset.Now.ToString("F", null);
     }
 }

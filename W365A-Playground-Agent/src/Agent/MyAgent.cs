@@ -46,7 +46,7 @@ namespace Microsoft.W365APlaygroundAgent.Agent
         You may ask follow up questions until you have enough information to answer the customers question, but once you have the current weather or a forecast, make sure to format it nicely in text.
         - For current weather, Use the {{WeatherLookupTool.GetCurrentWeatherForLocation}}, you should include the current temperature, low and high temperatures, wind speed, humidity, and a short description of the weather.
         - For forecast's, Use the {{WeatherLookupTool.GetWeatherForecastForLocation}}, you should report on the next 5 days, including the current day, and include the date, high and low temperatures, and a short description of the weather.
-        - You should use the {{DateTimePlugin.GetDateTime}} to get the current date and time.
+        - You should use the {{DateTimeFunctionTool.GetCurrentDateTime}} to get the current date and time.
 
         You have access to Windows 365 Cloud PC tools that let you control a remote Windows desktop.
         Available tools include: take_screenshot, browser_navigate, browser_screenshot, click, type_text, press_keys, scroll, analyze_screen, and many more.
@@ -71,18 +71,29 @@ namespace Microsoft.W365APlaygroundAgent.Agent
             return AgentInstructionsTemplate.Replace("{userName}", safe, StringComparison.Ordinal);
         }
 
+        // Magic-string config: Teams file-download attachment content type.
+        private const string TeamsFileDownloadContentType = "application/vnd.microsoft.teams.file.download.info";
+
         private readonly ResponsesOrchestrator _orchestrator;
-        private readonly IConfiguration? _configuration = null;
-        private readonly ILogger<MyAgent>? _logger = null;
-        private readonly IMcpToolRegistrationService? _toolService = null;
-        // Setup reusable auto sign-in handlers for user authorization (configurable via appsettings.json)
+        private readonly IConfiguration _configuration;
+        private readonly ILogger<MyAgent> _logger;
+        private readonly IMcpToolRegistrationService _toolService;
+        private readonly ILoggerFactory _loggerFactory;
+
+        // Reusable auto-sign-in handler names for user authorization (configurable via appsettings.json).
         private readonly string? AgenticAuthHandlerName;
         private readonly string? OboAuthHandlerName;
+
         // Caches MCP tools per user (keyed by user.toolCacheKey resolved in GetToolCacheKey).
         // MCP tool enumeration is expensive, so we resolve once per user and reuse for the
-        // lifetime of the process. For production with many distinct users, swap for a
-        // size-bounded LRU.
-        private static readonly ConcurrentDictionary<string, List<AITool>> _agentToolCache = new();
+        // lifetime of the process. Capped via simple LRU eviction to bound memory growth.
+        private const int MaxToolCacheEntries = 1000;
+        private sealed class ToolCacheEntry
+        {
+            public required IReadOnlyList<AITool> Tools { get; init; }
+            public DateTime LastAccessed { get; set; } = DateTime.UtcNow;
+        }
+        private static readonly ConcurrentDictionary<string, ToolCacheEntry> _agentToolCache = new();
 
         /// <summary>
         /// Check if a bearer token is available in the environment for development/testing.
@@ -115,12 +126,14 @@ namespace Microsoft.W365APlaygroundAgent.Agent
             ResponsesOrchestrator orchestrator,
             IConfiguration configuration,
             IMcpToolRegistrationService toolService,
-            ILogger<MyAgent> logger) : base(options)
+            ILogger<MyAgent> logger,
+            ILoggerFactory loggerFactory) : base(options)
         {
             _orchestrator = orchestrator;
             _configuration = configuration;
             _logger = logger;
             _toolService = toolService;
+            _loggerFactory = loggerFactory;
 
             // Read auth handler names from configuration (can be empty/null to disable)
             AgenticAuthHandlerName = _configuration.GetValue<string>("AgentApplication:AgenticAuthHandlerName");
@@ -173,7 +186,7 @@ namespace Microsoft.W365APlaygroundAgent.Agent
                 turnContext,
                 async () =>
             {
-                _logger?.LogInformation(
+                _logger.LogInformation(
                     "InstallationUpdate received — Action: '{Action}', DisplayName: '{Name}', UserId: '{Id}'",
                     turnContext.Activity.Action ?? "(none)",
                     turnContext.Activity.From?.Name ?? "(unknown)",
@@ -206,7 +219,7 @@ namespace Microsoft.W365APlaygroundAgent.Agent
 
             // Log the user identity from Activity.From — set by the A365 platform on every message.
             var fromAccount = turnContext.Activity.From;
-            _logger?.LogInformation(
+            _logger.LogInformation(
                 "Turn received from user — DisplayName: '{Name}', UserId: '{Id}', AadObjectId: '{AadObjectId}'",
                 fromAccount?.Name ?? "(unknown)",
                 fromAccount?.Id ?? "(unknown)",
@@ -272,7 +285,7 @@ namespace Microsoft.W365APlaygroundAgent.Agent
                     {
                         foreach (var attachment in turnContext.Activity.Attachments)
                         {
-                            if (attachment.ContentType == "application/vnd.microsoft.teams.file.download.info" && !string.IsNullOrEmpty(attachment.ContentUrl))
+                            if (attachment.ContentType == TeamsFileDownloadContentType && !string.IsNullOrEmpty(attachment.ContentUrl))
                             {
                                 userText += $"\n\n[User has attached a file: {attachment.Name}. The file can be downloaded from {attachment.ContentUrl}]";
                             }
@@ -319,29 +332,29 @@ namespace Microsoft.W365APlaygroundAgent.Agent
             }
             else if (TryGetBearerTokenForDevelopment(out var bearerToken))
             {
-                _logger?.LogInformation("Using bearer token from environment. Length: {Length}", bearerToken?.Length ?? 0);
+                _logger.LogInformation("Using bearer token from environment. Length: {Length}", bearerToken?.Length ?? 0);
                 accessToken = bearerToken;
                 agentId = Utility.ResolveAgentIdentity(context, accessToken!);
-                _logger?.LogInformation("Resolved agentId: '{AgentId}'", agentId ?? "(null)");
+                _logger.LogInformation("Resolved agentId: '{AgentId}'", agentId ?? "(null)");
             }
             else
             {
-                _logger?.LogWarning("No auth handler or bearer token available. MCP tools will not be loaded.");
+                _logger.LogWarning("No auth handler or bearer token available. MCP tools will not be loaded.");
             }
 
             if (!string.IsNullOrEmpty(accessToken) && string.IsNullOrEmpty(agentId))
             {
-                _logger?.LogWarning("Access token was acquired but agent identity could not be resolved. MCP tools will not be loaded.");
+                _logger.LogWarning("Access token was acquired but agent identity could not be resolved. MCP tools will not be loaded.");
             }
 
             // Create the local tools:
             var toolList = new List<AITool>();
-            WeatherLookupTool weatherLookupTool = new(context, _configuration!);
-            toolList.Add(AIFunctionFactory.Create(DateTimeFunctionTool.getDate));
+            WeatherLookupTool weatherLookupTool = new(context, _configuration, _loggerFactory.CreateLogger<WeatherLookupTool>());
+            toolList.Add(AIFunctionFactory.Create(DateTimeFunctionTool.GetCurrentDateTime));
             toolList.Add(AIFunctionFactory.Create(weatherLookupTool.GetCurrentWeatherForLocation));
             toolList.Add(AIFunctionFactory.Create(weatherLookupTool.GetWeatherForecastForLocation));
 
-            _logger?.LogInformation("GetToolsAsync: authHandler={Handler}, hasToken={HasToken}, agentId={AgentId}",
+            _logger.LogInformation("GetToolsAsync: authHandler={Handler}, hasToken={HasToken}, agentId={AgentId}",
                 authHandlerName, !string.IsNullOrEmpty(accessToken), agentId ?? "(null)");
 
             if (toolService != null && !string.IsNullOrEmpty(agentId))
@@ -349,13 +362,13 @@ namespace Microsoft.W365APlaygroundAgent.Agent
                 try
                 {
                     string toolCacheKey = GetToolCacheKey(turnState);
-                    if (_agentToolCache.ContainsKey(toolCacheKey))
+                    if (_agentToolCache.TryGetValue(toolCacheKey, out var cached))
                     {
-                        var cachedTools = _agentToolCache[toolCacheKey];
-                        if (cachedTools != null && cachedTools.Count > 0)
+                        cached.LastAccessed = DateTime.UtcNow;
+                        if (cached.Tools.Count > 0)
                         {
-                            _logger?.LogInformation("Tool cache hit ({Count} tools)", cachedTools.Count);
-                            toolList.AddRange(cachedTools);
+                            _logger.LogInformation("Tool cache hit ({Count} tools)", cached.Tools.Count);
+                            toolList.AddRange(cached.Tools);
                         }
                     }
                     else
@@ -373,11 +386,21 @@ namespace Microsoft.W365APlaygroundAgent.Agent
 
                         if (a365Tools != null && a365Tools.Count > 0)
                         {
-                            _logger?.LogInformation("MCP tools loaded ({Count}): {Names}",
+                            _logger.LogInformation("MCP tools loaded ({Count}): {Names}",
                                 a365Tools.Count,
                                 string.Join(", ", a365Tools.OfType<AIFunction>().Select(t => t.Name)));
                             toolList.AddRange(a365Tools);
-                            _agentToolCache.TryAdd(toolCacheKey, [.. a365Tools]);
+
+                            // Best-effort LRU: when at cap, drop the least-recently-accessed entry
+                            // before inserting the new one. Count + eviction is racy under concurrent
+                            // load (count may briefly exceed the cap); acceptable for a soft bound.
+                            if (_agentToolCache.Count >= MaxToolCacheEntries)
+                            {
+                                var oldest = _agentToolCache.MinBy(kvp => kvp.Value.LastAccessed);
+                                _agentToolCache.TryRemove(oldest.Key, out _);
+                                _logger.LogInformation("Tool cache cap reached ({Max}). Evicted: {Key}", MaxToolCacheEntries, oldest.Key);
+                            }
+                            _agentToolCache.TryAdd(toolCacheKey, new ToolCacheEntry { Tools = [.. a365Tools] });
                         }
                     }
                 }
@@ -385,11 +408,11 @@ namespace Microsoft.W365APlaygroundAgent.Agent
                 {
                     if (ShouldSkipToolingOnErrors())
                     {
-                        _logger?.LogWarning(ex, "Failed to register MCP tool servers. Continuing without MCP tools (SKIP_TOOLING_ON_ERRORS=true).");
+                        _logger.LogWarning(ex, "Failed to register MCP tool servers. Continuing without MCP tools (SKIP_TOOLING_ON_ERRORS=true).");
                     }
                     else
                     {
-                        _logger?.LogError(ex, "Failed to register MCP tool servers.");
+                        _logger.LogError(ex, "Failed to register MCP tool servers.");
                         throw;
                     }
                 }

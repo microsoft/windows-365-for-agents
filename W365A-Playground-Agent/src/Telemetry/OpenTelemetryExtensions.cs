@@ -80,69 +80,6 @@ namespace Microsoft.W365APlaygroundAgent.Telemetry
                             "agent.conversations.active",
                             "agent.route.execution.duration",
                             "agent.message.processing.duration");
-                })
-                .WithTracing(tracing =>
-                {
-                    /* Disabled — re-enable to capture ASP.NET Core and HTTP client traces.
-                    tracing.AddSource(builder.Environment.ApplicationName)
-                        .AddSource(
-                            "W365APlaygroundAgent",
-                            "Microsoft.Agents.Builder",
-                            "Microsoft.Agents.Hosting",
-                            "W365APlaygroundAgent.MyAgent",
-                            "Microsoft.AspNetCore",
-                            "System.Net.Http"
-                        );
-                    tracing
-                        .AddAspNetCoreInstrumentation(tracing =>
-                        {
-                            // Exclude health check requests from tracing
-                            tracing.Filter = context =>
-                                !context.Request.Path.StartsWithSegments(HealthEndpointPath)
-                                && !context.Request.Path.StartsWithSegments(AlivenessEndpointPath);
-                            tracing.RecordException = true;
-                            tracing.EnrichWithHttpRequest = (activity, request) =>
-                            {
-                                activity.SetTag("http.request.body.size", request.ContentLength);
-                                activity.SetTag("user_agent", request.Headers.UserAgent);
-                            };
-                            tracing.EnrichWithHttpResponse = (activity, response) =>
-                            {
-                                activity.SetTag("http.response.body.size", response.ContentLength);
-                            };
-                        })
-                        // Uncomment the following line to enable gRPC instrumentation (requires the OpenTelemetry.Instrumentation.GrpcNetClient package)
-                        //.AddGrpcClientInstrumentation()
-                        .AddHttpClientInstrumentation(o =>
-                        {
-                            o.RecordException = true;
-                            // Enrich outgoing request/response with extra tags
-                            o.EnrichWithHttpRequestMessage = (activity, request) =>
-                            {
-                                activity.SetTag("http.request.method", request.Method);
-                                activity.SetTag("http.request.host", request.RequestUri?.Host);
-                                activity.SetTag("http.request.useragent", request.Headers?.UserAgent);
-                            };
-                            o.EnrichWithHttpResponseMessage = (activity, response) =>
-                            {
-                                activity.SetTag("http.response.status_code", (int)response.StatusCode);
-                                // Convert response.Content.Headers to a string array: "HeaderName=val1,val2"
-                                var headerList = response.Content?.Headers?
-                                    .Select(h => $"{h.Key}={string.Join(",", h.Value)}")
-                                    .ToArray();
-
-                                if (headerList is { Length: > 0 })
-                                {
-                                    // Set as an array tag (preferred for OTEL exporters supporting array-of-primitive attributes)
-                                    activity.SetTag("http.response.headers", headerList);
-                                }
-
-                            };
-                            // Example filter: suppress telemetry for health checks
-                            o.FilterHttpRequestMessage = request =>
-                                !request.RequestUri?.AbsolutePath.Contains("health", StringComparison.OrdinalIgnoreCase) ?? true;
-                        });
-                    */
                 });
 
             builder.AddOpenTelemetryExporters();
