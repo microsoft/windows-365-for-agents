@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-using Agent365AgentFrameworkSampleAgent.ComputerUse.Models;
+using Microsoft.W365APlaygroundAgent.ComputerUse.Models;
 using Microsoft.Agents.Builder;
 using Microsoft.Agents.Core.Models;
 using Microsoft.Extensions.AI;
@@ -10,7 +10,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace Agent365AgentFrameworkSampleAgent.ComputerUse;
+namespace Microsoft.W365APlaygroundAgent.ComputerUse;
 
 /// <summary>
 /// Stateless Responses API orchestrator that manages the agentic tool-call loop for each conversation.

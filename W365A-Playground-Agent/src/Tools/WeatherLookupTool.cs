@@ -1,4 +1,4 @@
-﻿// Copyright (c) Microsoft Corporation. All rights reserved.
+// Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
 using Microsoft.Agents.Builder;
@@ -8,7 +8,7 @@ using OpenWeatherMapSharp;
 using OpenWeatherMapSharp.Models;
 using System.ComponentModel;
 
-namespace Agent365AgentFrameworkSampleAgent.Tools
+namespace Microsoft.W365APlaygroundAgent.Tools
 {
     public class WeatherLookupTool(ITurnContext turnContext, IConfiguration configuration)
     {

@@ -244,17 +244,9 @@ app.zip
 publish.zip
 backup/
 manifest/
-.claude/
-
-# Investigation/debug notes (local only)
-bug-*.md
-investigation-state.md
 
 # Agent 365 CLI backup files (contain real IDs)
 *.bak
-
-# Claude Code local instructions
-CLAUDE.md
 
 # Local secrets script (contains real credentials — never commit)
 set-secrets.ps1

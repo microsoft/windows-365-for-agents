@@ -1,9 +1,9 @@
-﻿// Copyright (c) Microsoft Corporation. All rights reserved.
+// Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
 using System.ComponentModel;
 
-namespace Agent365AgentFrameworkSampleAgent.Tools
+namespace Microsoft.W365APlaygroundAgent.Tools
 {
     public static class DateTimeFunctionTool
     {

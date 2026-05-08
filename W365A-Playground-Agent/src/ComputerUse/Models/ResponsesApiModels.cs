@@ -4,7 +4,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace Agent365AgentFrameworkSampleAgent.ComputerUse.Models;
+namespace Microsoft.W365APlaygroundAgent.ComputerUse.Models;
 
 internal record ResponsesResponse(
     [property: JsonPropertyName("id")] string Id,

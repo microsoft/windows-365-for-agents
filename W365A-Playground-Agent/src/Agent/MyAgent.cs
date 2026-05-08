@@ -1,9 +1,9 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-using Agent365AgentFrameworkSampleAgent.ComputerUse;
-using Agent365AgentFrameworkSampleAgent.telemetry;
-using Agent365AgentFrameworkSampleAgent.Tools;
+using Microsoft.W365APlaygroundAgent.ComputerUse;
+using Microsoft.W365APlaygroundAgent.Telemetry;
+using Microsoft.W365APlaygroundAgent.Tools;
 using Microsoft.Agents.A365.Runtime.Utils;
 using Microsoft.Agents.A365.Tooling.Extensions.AgentFramework.Services;
 using Microsoft.Agents.Builder;
@@ -14,7 +14,7 @@ using Microsoft.Agents.Core.Models;
 using Microsoft.Extensions.AI;
 using System.Collections.Concurrent;
 
-namespace Agent365AgentFrameworkSampleAgent.Agent
+namespace Microsoft.W365APlaygroundAgent.Agent
 {
     public class MyAgent : AgentApplication
     {

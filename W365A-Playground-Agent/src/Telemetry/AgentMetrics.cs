@@ -1,4 +1,4 @@
-﻿// Copyright (c) Microsoft Corporation. All rights reserved.
+// Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
 using Microsoft.Agents.Builder;
@@ -10,7 +10,7 @@ using System;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 
-namespace Agent365AgentFrameworkSampleAgent.telemetry
+namespace Microsoft.W365APlaygroundAgent.Telemetry
 {
     public static class AgentMetrics
     {

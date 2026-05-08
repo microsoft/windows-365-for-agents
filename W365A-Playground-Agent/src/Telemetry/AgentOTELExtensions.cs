@@ -13,7 +13,7 @@ using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 
-namespace Agent365AgentFrameworkSampleAgent.telemetry
+namespace Microsoft.W365APlaygroundAgent.Telemetry
 {
     // Adds common Aspire services: service discovery, resilience, health checks, and OpenTelemetry.
     // This can be used by ASP.NET Core apps, Azure Functions, and other .NET apps using the Generic Host.

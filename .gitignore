@@ -1,0 +1,9 @@
+# Claude Code local instructions (AI guidance — not for public consumption)
+CLAUDE.md
+
+# Claude Code project memory
+.claude/
+
+# Local investigation/debug notes
+bug-*.md
+investigation-state.md

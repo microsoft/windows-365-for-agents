@@ -1,10 +1,10 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-using Agent365AgentFrameworkSampleAgent;
-using Agent365AgentFrameworkSampleAgent.Agent;
-using Agent365AgentFrameworkSampleAgent.ComputerUse;
-using Agent365AgentFrameworkSampleAgent.telemetry;
+using Microsoft.W365APlaygroundAgent;
+using Microsoft.W365APlaygroundAgent.Agent;
+using Microsoft.W365APlaygroundAgent.ComputerUse;
+using Microsoft.W365APlaygroundAgent.Telemetry;
 using Microsoft.Agents.A365.Observability;
 using Microsoft.Agents.A365.Observability.Extensions.AgentFramework;
 using Microsoft.Agents.A365.Observability.Runtime;
