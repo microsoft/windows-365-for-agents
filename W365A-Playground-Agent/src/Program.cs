@@ -2,7 +2,6 @@
 // Licensed under the MIT License.
 
 using Microsoft.W365APlaygroundAgent;
-using Microsoft.W365APlaygroundAgent.AccessControl;
 using Microsoft.W365APlaygroundAgent.Agent;
 using Microsoft.W365APlaygroundAgent.ComputerUse;
 using Microsoft.W365APlaygroundAgent.Telemetry;
@@ -46,10 +45,6 @@ builder.AddA365Tracing(config =>
 // ToolingManifest.json (e.g. mcp_W365ComputerUse for Cloud PC computer use).
 builder.Services.AddSingleton<IMcpToolRegistrationService, McpToolRegistrationService>();
 builder.Services.AddSingleton<IMcpToolServerConfigurationService, McpToolServerConfigurationService>();
-
-// Caller access control: gates /api/messages on the caller's Entra OID. Singleton so the
-// in-memory cache + MSAL app instance are shared across the (transient) MyAgent instances.
-builder.Services.AddSingleton<ICallerAccessControl, CallerAccessControl>();
 
 // Per-user turn quota: 100 turns per rolling 24h, in-memory. Singleton so state is shared
 // across the (transient) MyAgent instances. For multi-instance production, back this with

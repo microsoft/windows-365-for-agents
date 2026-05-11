@@ -22,12 +22,8 @@ By following this sample end-to-end, you will:
   reasons over them.
 - Run two auth modes: `ClientSecret` for local Playground testing,
   `UserManagedIdentity` for A365 production.
-- Gate the `/api/messages` endpoint on the **caller's Entra Object ID** — only callers
-  who are native members or B2B guests of your blueprint tenant (or appear in a static
-  allowlist) get a response.
 - Cap abuse with a **two-gate throttle**: 50 req/s global HTTP rate limit + per-user
-  100 turns / 24 h rolling quota — so a runaway script or curious external user can't
-  burn unbounded LLM tokens.
+  100 turns / 24 h rolling quota — so a runaway script can't burn unbounded LLM tokens.
 - Use the **`a365` CLI** to provision the agent blueprint, grant permissions, and deploy
   to Azure App Service.
 
@@ -72,45 +68,8 @@ The agent listens on `http://localhost:3978/api/messages`.
 | Agent | `MyAgent : AgentApplication` (`src/Agent/MyAgent.cs`) | Turn handlers, install/uninstall, welcome message |
 | LLM loop | `ResponsesOrchestrator` (`src/ComputerUse/`) | OpenAI Responses API, tool-call dispatch, screenshot forwarding |
 | Tools | `src/Tools/` + `ToolingManifest.json` | Local tools (weather, datetime) + MCP servers (`mcp_W365ComputerUse`, etc.) |
-| Access control | `src/AccessControl/` | Caller-OID authorization on `/api/messages` (allowlist → native member → B2B guest) |
 | Throttling | `src/Throttling/` | Per-user turn quota (100 / 24h) + global HTTP rate limit (50 / s) on `/api/messages` |
 | Platform | `Microsoft.Agents.A365.*` | Agent blueprint, MCP tooling, observability |
-
-## Caller access control
-
-The `/api/messages` endpoint validates the caller's Entra Object ID before any LLM call.
-Bot Framework JWT validation alone only proves the request came through Azure Bot Service —
-it does not restrict *which* Teams user can send messages, so without this check any Teams
-user in any tenant who finds the agent would get a full LLM response.
-
-Three checks run in order (results cached for one hour per OID):
-
-1. **Static allowlist** — OIDs listed in `AccessControl:AllowedOids` in `appsettings.json`.
-   For external callers who can't be onboarded as B2B guests.
-2. **Native member** of the blueprint tenant — `GET https://graph.microsoft.com/v1.0/users/{oid}`.
-   Passes for anyone whose account lives natively in your tenant.
-3. **B2B guest** in the blueprint tenant — `GET /users?$filter=identities/any(...)` with
-   `ConsistencyLevel: eventual`. A guest's OID in the blueprint tenant differs from their
-   home OID, so step 2 returns 404 for them; this step matches them by their home OID.
-
-Callers who fail all three get a polite "not authorized" reply. The check is skipped
-automatically in `BEARER_TOKEN` development mode (no real Teams caller in that flow).
-
-| Customer scenario | How to grant access |
-|---|---|
-| User in your blueprint tenant | Automatic — passes step 2 |
-| External user, invited as B2B guest | Invite them; they're authorized within an hour (cache TTL) |
-| External user, no guest invite possible | Add their Entra Object ID to `AccessControl:AllowedOids` |
-
-For immediate revocation, restart the App Service to clear the in-memory cache.
-
-The implementation in `src/AccessControl/CallerAccessControl.cs` uses MSAL `ClientSecret`
-auth to acquire the Graph token. **For production with `UserManagedIdentity`**, swap in
-`ManagedIdentityCredential` (or `WithCertificate`) — there is no client secret in that flow.
-
-The blueprint app needs `User.Read.All` Microsoft Graph application permission for the
-Graph lookups to succeed. `a365 setup all` grants this by default as part of the standard
-Graph permission set; no extra step required for typical setups.
 
 ## Throttling
 
@@ -123,8 +82,7 @@ generating hundreds of LLM calls in minutes).
 | **HTTP rate limit** | All callers, globally | 50 req / 1 s | ASP.NET Core fixed-window limiter on `/api/messages` | HTTP `429 Too Many Requests` |
 | **Per-user turn quota** | Per `Activity.From.AadObjectId` | 100 turns / rolling 24 h | In-memory `Queue<DateTime>` per OID, prune-on-read | Friendly text reply, not 429 |
 
-The quota check runs after access control so denied unauthorized callers don't consume
-slots. Both gates skip automatically in `BEARER_TOKEN` development mode.
+Both gates skip automatically in `BEARER_TOKEN` development mode.
 
 ### Caveats
 
@@ -160,7 +118,6 @@ W365A-Playground-Agent/
     ├── Agent/MyAgent.cs               ← agent logic
     ├── ComputerUse/                   ← Responses API + screenshot forwarding
     ├── Tools/                         ← local tools (weather, datetime)
-    ├── AccessControl/                 ← caller-OID authorization on /api/messages
     ├── Throttling/                    ← per-user turn quota + global HTTP rate limit
     ├── Telemetry/                     ← OpenTelemetry + A365 observability
     ├── appsettings.json               ← <<PLACEHOLDER>> values
