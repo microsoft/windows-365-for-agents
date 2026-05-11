@@ -198,6 +198,46 @@ This is a dedicated Entra app the a365 CLI uses to authenticate itself when mana
 
 When running `a365 setup all`, provide your custom client app Client ID when prompted.
 
+### Create `a365.config.json` from the templates
+
+> **Schema version**: the fields below match Agent 365 CLI `1.1.176+f58fdbcd84`.
+> If the CLI rejects your file with an unexpected validation error after a CLI update,
+> check `a365 --version` against this note and consult the latest model at
+> https://github.com/microsoft/Agent365-devTools/blob/main/src/Microsoft.Agents.A365.DevTools.Cli/Models/Agent365Config.cs.
+
+`a365 setup all` reads `a365.config.json` from your project folder for tenant and agent
+identifiers. Two starter templates ship with this repo:
+
+| Template | When to use it |
+|---|---|
+| `src/a365.config.min.json` | Smallest valid file — just the required fields plus the few you almost always need. Best for first-time setup. |
+| `src/a365.config.full.json` | Full surface — every static field, including Azure OpenAI, `mcpDefaultServers`, and `customBlueprintPermissions`. Useful when you want to see what's available. |
+
+Copy whichever one fits your scenario to `a365.config.json` (which is gitignored, so your
+real values stay local), then fill in the `<<placeholders>>`:
+
+```powershell
+cd src
+
+# Pick ONE of these:
+Copy-Item a365.config.min.json  a365.config.json   # minimal
+Copy-Item a365.config.full.json a365.config.json   # full
+
+# Open it and replace each <<...>> with your real value:
+notepad a365.config.json
+```
+
+**Required fields (the CLI rejects the file otherwise):**
+
+| Field | Value |
+|---|---|
+| `tenantId` | Your Entra tenant ID (GUID) |
+| `clientAppId` | Your custom client app ID from the previous step (GUID) |
+| `agentIdentityDisplayName` | Display name for the agent identity in Azure AD |
+
+`authMode`, if set, must be `obo`, `s2s`, or `both`. Everything else is optional with
+sensible defaults — see the [a365 CLI docs](https://learn.microsoft.com/microsoft-agent-365/developer/reference/cli/setup) for the full schema.
+
 ### Setup blueprint + Azure resources
 
 ```powershell
