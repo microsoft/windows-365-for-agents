@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
+using Microsoft.W365APlaygroundAgent.AccessControl;
 using Microsoft.W365APlaygroundAgent.ComputerUse;
 using Microsoft.W365APlaygroundAgent.Telemetry;
 using Microsoft.W365APlaygroundAgent.Tools;
@@ -79,6 +80,7 @@ namespace Microsoft.W365APlaygroundAgent.Agent
         private readonly ILogger<MyAgent> _logger;
         private readonly IMcpToolRegistrationService _toolService;
         private readonly ILoggerFactory _loggerFactory;
+        private readonly ICallerAccessControl _accessControl;
 
         // Reusable auto-sign-in handler names for user authorization (configurable via appsettings.json).
         private readonly string? AgenticAuthHandlerName;
@@ -127,13 +129,15 @@ namespace Microsoft.W365APlaygroundAgent.Agent
             IConfiguration configuration,
             IMcpToolRegistrationService toolService,
             ILogger<MyAgent> logger,
-            ILoggerFactory loggerFactory) : base(options)
+            ILoggerFactory loggerFactory,
+            ICallerAccessControl accessControl) : base(options)
         {
             _orchestrator = orchestrator;
             _configuration = configuration;
             _logger = logger;
             _toolService = toolService;
             _loggerFactory = loggerFactory;
+            _accessControl = accessControl;
 
             // Read auth handler names from configuration (can be empty/null to disable)
             AgenticAuthHandlerName = _configuration.GetValue<string>("AgentApplication:AgenticAuthHandlerName");
@@ -224,6 +228,23 @@ namespace Microsoft.W365APlaygroundAgent.Agent
                 fromAccount?.Name ?? "(unknown)",
                 fromAccount?.Id ?? "(unknown)",
                 fromAccount?.AadObjectId ?? "(none)");
+
+            // Access control: skip in BEARER_TOKEN dev mode (no real Teams caller).
+            // Production: caller must be in the OID allowlist, exist as a native member,
+            // or exist as a B2B guest in the blueprint tenant.
+            if (!TryGetBearerTokenForDevelopment(out _))
+            {
+                var callerOid = fromAccount?.AadObjectId;
+                if (!await _accessControl.IsAuthorizedAsync(callerOid, cancellationToken))
+                {
+                    _logger.LogWarning("AccessControl: DENIED — OID={OID} DisplayName='{Name}'",
+                        callerOid ?? "(null)", fromAccount?.Name ?? "(unknown)");
+                    await turnContext.SendActivityAsync(
+                        MessageFactory.Text("Sorry, you are not authorized to use this agent."), cancellationToken);
+                    return;
+                }
+                _logger.LogInformation("AccessControl: ALLOWED — OID={OID}", callerOid);
+            }
 
             // Select the appropriate auth handler based on request type
             // For agentic requests, use the agentic auth handler
