@@ -4,6 +4,7 @@
 using Microsoft.W365APlaygroundAgent.AccessControl;
 using Microsoft.W365APlaygroundAgent.ComputerUse;
 using Microsoft.W365APlaygroundAgent.Telemetry;
+using Microsoft.W365APlaygroundAgent.Throttling;
 using Microsoft.W365APlaygroundAgent.Tools;
 using Microsoft.Agents.A365.Runtime.Utils;
 using Microsoft.Agents.A365.Tooling.Extensions.AgentFramework.Services;
@@ -81,6 +82,7 @@ namespace Microsoft.W365APlaygroundAgent.Agent
         private readonly IMcpToolRegistrationService _toolService;
         private readonly ILoggerFactory _loggerFactory;
         private readonly ICallerAccessControl _accessControl;
+        private readonly IUserTurnLimiter _turnLimiter;
 
         // Reusable auto-sign-in handler names for user authorization (configurable via appsettings.json).
         private readonly string? AgenticAuthHandlerName;
@@ -130,7 +132,8 @@ namespace Microsoft.W365APlaygroundAgent.Agent
             IMcpToolRegistrationService toolService,
             ILogger<MyAgent> logger,
             ILoggerFactory loggerFactory,
-            ICallerAccessControl accessControl) : base(options)
+            ICallerAccessControl accessControl,
+            IUserTurnLimiter turnLimiter) : base(options)
         {
             _orchestrator = orchestrator;
             _configuration = configuration;
@@ -138,6 +141,7 @@ namespace Microsoft.W365APlaygroundAgent.Agent
             _toolService = toolService;
             _loggerFactory = loggerFactory;
             _accessControl = accessControl;
+            _turnLimiter = turnLimiter;
 
             // Read auth handler names from configuration (can be empty/null to disable)
             AgenticAuthHandlerName = _configuration.GetValue<string>("AgentApplication:AgenticAuthHandlerName");
@@ -244,6 +248,24 @@ namespace Microsoft.W365APlaygroundAgent.Agent
                     return;
                 }
                 _logger.LogInformation("AccessControl: ALLOWED — OID={OID}", callerOid);
+            }
+
+            // Per-user turn quota: 100 turns per rolling 24h. Runs after access control so denied
+            // unauthorized callers don't consume slots. Skipped in BEARER_TOKEN dev mode.
+            if (!TryGetBearerTokenForDevelopment(out _))
+            {
+                var quotaOid = fromAccount?.AadObjectId;
+                if (!_turnLimiter.TryConsume(quotaOid, out var turnCount))
+                {
+                    _logger.LogWarning("TurnLimit: BLOCKED — OID={OID} count={Count}",
+                        quotaOid ?? "(null)", turnCount);
+                    await turnContext.SendActivityAsync(
+                        MessageFactory.Text("You've reached the usage limit (100 turns per 24h). Please try again later."),
+                        cancellationToken);
+                    return;
+                }
+                _logger.LogInformation("TurnLimit: {Count}/100 (24h) for OID={OID}",
+                    turnCount, quotaOid ?? "(null)");
             }
 
             // Select the appropriate auth handler based on request type

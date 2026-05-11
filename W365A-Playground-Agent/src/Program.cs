@@ -6,6 +6,9 @@ using Microsoft.W365APlaygroundAgent.AccessControl;
 using Microsoft.W365APlaygroundAgent.Agent;
 using Microsoft.W365APlaygroundAgent.ComputerUse;
 using Microsoft.W365APlaygroundAgent.Telemetry;
+using Microsoft.W365APlaygroundAgent.Throttling;
+using Microsoft.AspNetCore.RateLimiting;
+using System.Threading.RateLimiting;
 using Microsoft.Agents.A365.Observability;
 using Microsoft.Agents.A365.Observability.Extensions.AgentFramework;
 using Microsoft.Agents.A365.Observability.Runtime;
@@ -48,6 +51,25 @@ builder.Services.AddSingleton<IMcpToolServerConfigurationService, McpToolServerC
 // in-memory cache + MSAL app instance are shared across the (transient) MyAgent instances.
 builder.Services.AddSingleton<ICallerAccessControl, CallerAccessControl>();
 
+// Per-user turn quota: 100 turns per rolling 24h, in-memory. Singleton so state is shared
+// across the (transient) MyAgent instances. For multi-instance production, back this with
+// a distributed store (AzureTableStorage or Redis) so counts are shared across instances.
+builder.Services.AddSingleton<IUserTurnLimiter, UserTurnLimiter>();
+
+// Global HTTP rate limit on /api/messages: 50 req/s across all callers, no queueing.
+// Returns 429 immediately on overflow. Coarse upper bound that halts a runaway script
+// without hampering normal Teams traffic.
+builder.Services.AddRateLimiter(options =>
+{
+    options.AddFixedWindowLimiter("messagesGlobal", o =>
+    {
+        o.PermitLimit = 50;
+        o.Window = TimeSpan.FromSeconds(1);
+        o.QueueLimit = 0;
+    });
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+});
+
 // ───── Auth & storage ─────
 // JWT validation for incoming Bot Framework / agentic tokens (config: TokenValidation:*).
 builder.Services.AddAgentAspNetAuthentication(builder.Configuration);
@@ -78,18 +100,20 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseRouting();
+app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 
 
-// Map the /api/messages endpoint to the AgentApplication
+// Map the /api/messages endpoint to the AgentApplication.
+// RequireRateLimiting attaches the "messagesGlobal" policy declared above.
 app.MapPost("/api/messages", async (HttpRequest request, HttpResponse response, IAgentHttpAdapter adapter, IAgent agent, CancellationToken cancellationToken) =>
 {
     await AgentMetrics.InvokeObservedHttpOperation("agent.process_message", async () =>
     {
         await adapter.ProcessAsync(request, response, agent, cancellationToken);
     }).ConfigureAwait(false);
-});
+}).RequireRateLimiting("messagesGlobal");
 
 // Health check endpoint for CI/CD pipelines and monitoring
 app.MapGet("/api/health", () => Results.Ok(new { status = "healthy", timestamp = System.DateTime.UtcNow }));

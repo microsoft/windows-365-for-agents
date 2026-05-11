@@ -25,6 +25,9 @@ By following this sample end-to-end, you will:
 - Gate the `/api/messages` endpoint on the **caller's Entra Object ID** — only callers
   who are native members or B2B guests of your blueprint tenant (or appear in a static
   allowlist) get a response.
+- Cap abuse with a **two-gate throttle**: 50 req/s global HTTP rate limit + per-user
+  100 turns / 24 h rolling quota — so a runaway script or curious external user can't
+  burn unbounded LLM tokens.
 - Use the **`a365` CLI** to provision the agent blueprint, grant permissions, and deploy
   to Azure App Service.
 
@@ -70,6 +73,7 @@ The agent listens on `http://localhost:3978/api/messages`.
 | LLM loop | `ResponsesOrchestrator` (`src/ComputerUse/`) | OpenAI Responses API, tool-call dispatch, screenshot forwarding |
 | Tools | `src/Tools/` + `ToolingManifest.json` | Local tools (weather, datetime) + MCP servers (`mcp_W365ComputerUse`, etc.) |
 | Access control | `src/AccessControl/` | Caller-OID authorization on `/api/messages` (allowlist → native member → B2B guest) |
+| Throttling | `src/Throttling/` | Per-user turn quota (100 / 24h) + global HTTP rate limit (50 / s) on `/api/messages` |
 | Platform | `Microsoft.Agents.A365.*` | Agent blueprint, MCP tooling, observability |
 
 ## Caller access control
@@ -108,6 +112,40 @@ The blueprint app needs `User.Read.All` Microsoft Graph application permission f
 Graph lookups to succeed. `a365 setup all` grants this by default as part of the standard
 Graph permission set; no extra step required for typical setups.
 
+## Throttling
+
+Two independent gates protect the agent from abuse — together they prevent both volumetric
+floods (a script hammering the endpoint) and runaway single-user usage (a buggy script
+generating hundreds of LLM calls in minutes).
+
+| Gate | Scope | Limit | Mechanism | Response on overflow |
+|---|---|---|---|---|
+| **HTTP rate limit** | All callers, globally | 50 req / 1 s | ASP.NET Core fixed-window limiter on `/api/messages` | HTTP `429 Too Many Requests` |
+| **Per-user turn quota** | Per `Activity.From.AadObjectId` | 100 turns / rolling 24 h | In-memory `Queue<DateTime>` per OID, prune-on-read | Friendly text reply, not 429 |
+
+The quota check runs after access control so denied unauthorized callers don't consume
+slots. Both gates skip automatically in `BEARER_TOKEN` development mode.
+
+### Caveats
+
+- **In-memory state.** The per-user quota resets when the App Service restarts — anyone
+  over the cap is unblocked. For a multi-instance production deployment, replace
+  `UserTurnLimiter` with one backed by AzureTableStorage or Redis so per-user counts
+  are shared across instances.
+- **Quota response is a text reply, not HTTP 429.** Only the global rate limiter returns
+  429. The quota gate sends a human-readable message back through Teams.
+
+### Tuning
+
+All knobs are constants in code — no `appsettings.json` entries:
+
+| Setting | Where | Default |
+|---|---|---|
+| Global permit limit (req/window) | `Program.cs` → `o.PermitLimit` | `50` |
+| Global window | `Program.cs` → `o.Window` | `1 s` |
+| Per-user turn cap | `Throttling/UserTurnLimiter.cs` → `MaxTurnsPerWindow` | `100` |
+| Per-user window | `Throttling/UserTurnLimiter.cs` → `WindowHours` | `24` |
+
 ## Project layout
 
 ```
@@ -123,6 +161,7 @@ W365A-Playground-Agent/
     ├── ComputerUse/                   ← Responses API + screenshot forwarding
     ├── Tools/                         ← local tools (weather, datetime)
     ├── AccessControl/                 ← caller-OID authorization on /api/messages
+    ├── Throttling/                    ← per-user turn quota + global HTTP rate limit
     ├── Telemetry/                     ← OpenTelemetry + A365 observability
     ├── appsettings.json               ← <<PLACEHOLDER>> values
     ├── appsettings.Playground.json    ← <<PLACEHOLDER>> values
