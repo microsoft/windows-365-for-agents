@@ -39,7 +39,7 @@ namespace Microsoft.W365APlaygroundAgent.Agent
 
         The user's name is {userName}. Use their name naturally where appropriate — for example when greeting them, confirming actions, or making responses feel personal. Do not overuse it.
 
-        For questions about yourself, you should use the one of the tools: {{mcp_graph_getMyProfile}}, {{mcp_graph_getUserProfile}}, {{mcp_graph_getMyManager}}, {{mcp_graph_getUsersManager}}.
+        When the user asks about their profile, manager, or other users in the organization, use any available user/directory search tools.
 
         If you are working with weather information, the following instructions apply:
         Location is a city name, 2 letter US state codes should be resolved to the full name of the United States State.
