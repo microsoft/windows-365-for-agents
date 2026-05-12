@@ -102,6 +102,8 @@ In Visual Studio, select **DevelopmentMode** from the debug profile dropdown. Th
 
 ## Production Setup (Full A365)
 
+> **Faster path:** if you have GitHub Copilot, Claude Code, or another agent IDE, the official **[AI-guided setup](https://aka.ms/agent365enable)** automates the CLI install, blueprint creation, code instrumentation, and deployment in one prompt. The manual steps below are the equivalent path when you prefer running the CLI yourself.
+
 ### One-time tenant setup (Global Admin required)
 
 ```powershell
@@ -193,8 +195,8 @@ a365 develop list-available
 
 # Add server(s) to ToolingManifest.json
 a365 develop add-mcp-servers mcp_W365ComputerUse
-a365 develop add-mcp-servers mcp_OneDriveRemoteServer
 a365 develop add-mcp-servers mcp_MailTools
+a365 develop add-mcp-servers mcp_TeamsServer
 ```
 
 After running, verify `ToolingManifest.json` has all required fields per server: `mcpServerName`, `mcpServerUniqueName`, `url`, `scope`, `audience`.

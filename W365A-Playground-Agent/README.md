@@ -64,12 +64,21 @@ The agent listens on `http://localhost:3978/api/messages`.
 
 | Stack layer | Component | What it does |
 |---|---|---|
-| Hosting | `Microsoft.Agents.Hosting.AspNetCore` | Bot Framework adapter, Teams / Playground channel |
+| Hosting | `Microsoft.Agents.Hosting.AspNetCore` | Bot Framework adapter, Teams channel |
 | Agent | `PlaygroundAgent : AgentApplication` (`src/Agent/PlaygroundAgent.cs`) | Turn handlers, install/uninstall, welcome message |
 | LLM loop | `ResponsesOrchestrator` (`src/ComputerUse/`) | OpenAI Responses API, tool-call dispatch, screenshot forwarding |
 | Tools | `src/LocalTools/` + `ToolingManifest.json` | Local tools (weather, datetime) + MCP servers (`mcp_W365ComputerUse`, etc.) |
 | Throttling | `src/Throttling/` | Per-user turn quota (100 / 24h) + global HTTP rate limit (50 / s) on `/api/messages` |
 | Platform | `Microsoft.Agents.A365.*` | Agent blueprint, MCP tooling, observability |
+
+## How Agent 365 concepts map to this sample
+
+| Agent 365 concept | In this sample |
+|---|---|
+| Agent identity blueprint | `Connections:ServiceConnection` in `appsettings.json` (provisioned by `a365 setup all`) |
+| Work IQ MCP servers | `ToolingManifest.json` (gateway scopes granted via `a365 setup permissions mcp`) |
+| Agentic auth | `AgentApplication:AgenticAuthHandlerName: "agentic"` in `appsettings.json` |
+| Observability baggage | `src/Telemetry/A365OtelWrapper.cs` (per-turn tenant + agent ID) |
 
 ## Throttling
 
