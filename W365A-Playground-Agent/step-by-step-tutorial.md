@@ -455,12 +455,12 @@ The two throttling gates (HTTP rate limit + per-user turn quota) are described a
 
 ### Tuning
 
-All knobs are constants in code — no `appsettings.json` entries:
+The defaults below are intentionally conservative for a demo agent. To raise either limit for your own workload, edit the constants directly in code — there are no `appsettings.json` entries:
 
 | Setting | Where | Default |
 |---|---|---|
-| Global permit limit (req/window) | `Program.cs` → `o.PermitLimit` | `50` |
-| Global window | `Program.cs` → `o.Window` | `1 s` |
+| Global permit limit (req/window) | `Program.cs` → `o.PermitLimit` | `5` |
+| Global window | `Program.cs` → `o.Window` | `1 min` |
 | Per-user turn cap | `Throttling/UserTurnLimiter.cs` → `MaxTurnsPerWindow` | `100` |
 | Per-user window | `Throttling/UserTurnLimiter.cs` → `WindowHours` | `24` |
 
@@ -520,5 +520,5 @@ Restart the deployed agent (or wait for its token cache to refresh) — existing
 **`mcp_MailTools` fails with `CancellationTokenSource has been disposed` (other MCP servers work)**
 → This is a known bug in A365 SDK `0.1.x-beta` ([Agent365-dotnet#223](https://github.com/microsoft/Agent365-dotnet/issues/223), [Agent365-Samples#254](https://github.com/microsoft/Agent365-Samples/issues/254)). Fix: upgrade A365 SDK packages to `0.2.118-beta` or later.
 
-**`mcp_W365ComputerUse` loads exactly one tool named `Error` (other MCP servers load their full tool sets)**
-→ The W365 MCP server returns a single placeholder tool named `Error` when it can't resolve a Cloud PC for the calling agent identity. Fix: assign a [Windows 365 Cloud PC agent pool](../docs/cloud-pc-pools.md) to the agent user (`<agent>@<tenant>.onmicrosoft.com`) in the Intune admin center, then restart the deployed app. The server's full tool set (`mcp_desktop_*`, `mcp_browser_*`, `mcp_accessibility_*` per the [W365 MCP server reference](https://learn.microsoft.com/en-us/microsoft-agent-365/mcp-server-reference/windows-365-agents)) will load on the next agent boot.
+**Before invoking `mcp_W365ComputerUse`, assign a Cloud PC pool to the agent user**
+→ The `mcp_W365ComputerUse` tools drive a Windows 365 Cloud PC. Assign a [Windows 365 Cloud PC agent pool](../docs/cloud-pc-pools.md) to the agent user (`<agent>@<tenant>.onmicrosoft.com`) in the Intune admin center before you exercise the W365 tools, then restart the deployed app so the agent picks up the new pool. See the [W365 MCP server reference](https://learn.microsoft.com/en-us/microsoft-agent-365/mcp-server-reference/windows-365-agents) for the full tool list (`mcp_desktop_*`, `mcp_browser_*`, `mcp_accessibility_*`).

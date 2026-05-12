@@ -45,15 +45,15 @@ builder.Services.AddSingleton<IMcpToolServerConfigurationService, McpToolServerC
 // a distributed store (AzureTableStorage or Redis) so counts are shared across instances.
 builder.Services.AddSingleton<IUserTurnLimiter, UserTurnLimiter>();
 
-// Global HTTP rate limit on /api/messages: 50 req/s across all callers, no queueing.
-// Returns 429 immediately on overflow. Coarse upper bound that halts a runaway script
-// without hampering normal Teams traffic.
+// Global HTTP rate limit on /api/messages: 5 req/min across all callers, no queueing.
+// Conservative ceiling for a demo agent — returns 429 immediately on overflow. To raise
+// it for your own workload, edit the constants below (PermitLimit / Window).
 builder.Services.AddRateLimiter(options =>
 {
     options.AddFixedWindowLimiter("messagesGlobal", o =>
     {
-        o.PermitLimit = 50;
-        o.Window = TimeSpan.FromSeconds(1);
+        o.PermitLimit = 5;
+        o.Window = TimeSpan.FromMinutes(1);
         o.QueueLimit = 0;
     });
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;

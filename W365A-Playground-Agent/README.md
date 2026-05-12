@@ -21,7 +21,7 @@ By following this sample end-to-end, you will:
 - Forward Cloud PC screenshots back to the user as message attachments while the model
   reasons over them.
 - Use `UserManagedIdentity` auth in A365 production (managed identity + Federated Identity Credential).
-- Cap abuse with a **two-gate throttle**: 50 req/s global HTTP rate limit + per-user
+- Cap abuse with a **two-gate throttle**: 5 req/min global HTTP rate limit + per-user
   100 turns / 24 h rolling quota — so a runaway script can't burn unbounded LLM tokens.
 - Use the **`a365` CLI** to provision the agent blueprint, grant permissions, and deploy
   to Azure App Service.
@@ -73,7 +73,7 @@ The agent listens on `http://localhost:3978/api/messages`.
 | Agent | `PlaygroundAgent : AgentApplication` (`src/Agent/PlaygroundAgent.cs`) | Turn handlers, install/uninstall, welcome message |
 | LLM loop | `ResponsesOrchestrator` (`src/ComputerUse/`) | OpenAI Responses API, tool-call dispatch, screenshot forwarding |
 | Tools | `src/LocalTools/` + `ToolingManifest.json` | Local tools (weather, datetime) + MCP servers (`mcp_W365ComputerUse`, etc.) |
-| Throttling | `src/Throttling/` | Per-user turn quota (100 / 24h) + global HTTP rate limit (50 / s) on `/api/messages` |
+| Throttling | `src/Throttling/` | Per-user turn quota (100 / 24h) + global HTTP rate limit (5 / min) on `/api/messages` |
 | Platform | `Microsoft.Agents.A365.*` | Agent blueprint, MCP tooling, observability |
 
 ## How Agent 365 concepts map to this sample
@@ -93,7 +93,7 @@ generating hundreds of LLM calls in minutes).
 
 | Gate | Scope | Limit | Mechanism | Response on overflow |
 |---|---|---|---|---|
-| **HTTP rate limit** | All callers, globally | 50 req / 1 s | ASP.NET Core fixed-window limiter on `/api/messages` | HTTP `429 Too Many Requests` |
+| **HTTP rate limit** | All callers, globally | 5 req / 1 min | ASP.NET Core fixed-window limiter on `/api/messages` | HTTP `429 Too Many Requests` |
 | **Per-user turn quota** | Per `Activity.From.AadObjectId` | 100 turns / rolling 24 h | In-memory `Queue<DateTime>` per OID, prune-on-read | Friendly text reply, not 429 |
 
 Both gates skip automatically in `BEARER_TOKEN` development mode.
