@@ -2,10 +2,6 @@
 // Licensed under the MIT License.
 
 using Microsoft.Agents.Builder;
-using Microsoft.Agents.Core;
-using OpenTelemetry;
-using OpenTelemetry.Metrics;
-using OpenTelemetry.Resources;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 

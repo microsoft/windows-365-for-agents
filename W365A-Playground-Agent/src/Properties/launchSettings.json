@@ -1,0 +1,16 @@
+{
+  "profiles": {
+    "DevelopmentMode": {
+      "commandName": "Project",
+      "launchBrowser": true,
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "BEARER_TOKEN": "<<BEARER_TOKEN>>",
+        "BEARER_TOKEN_MCP_MAILTOOLS": "<<BEARER_TOKEN_MCP_MAILTOOLS>>",
+        "BEARER_TOKEN_MCP_W365COMPUTERUSE": "<<BEARER_TOKEN_MCP_W365COMPUTERUSE>>",
+        "BEARER_TOKEN_MCP_TEAMSSERVER": "<<BEARER_TOKEN_MCP_TEAMSSERVER>>"
+      },
+      "applicationUrl": "https://localhost:64174;http://localhost:64175"
+    }
+  }
+}

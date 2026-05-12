@@ -67,26 +67,18 @@ dotnet user-secrets set "TokenValidation:Enabled"                "false"
 
 > User secrets ID: `7a8f9d79-5c4c-495f-8d56-1db8168ef8bd` (set in the `.csproj`)
 
-### 2. Create launch profiles
+### 2. Launch profile
 
-`Properties/launchSettings.json` is excluded from git. Create it manually:
+`Properties/launchSettings.json` ships in the repo with `<<BEARER_TOKEN_*>>` placeholders.
+The `DevelopmentMode` profile sets `ASPNETCORE_ENVIRONMENT=Development` and declares the
+bearer-token env vars the agent reads when calling MCP servers as the blueprint identity.
+Run `a365 develop get-token` (see Production Setup below) to fill them in.
 
-**`src/Properties/launchSettings.json`:**
-```json
-{
-  "profiles": {
-    "DevelopmentMode": {
-      "commandName": "Project",
-      "launchBrowser": true,
-      "environmentVariables": {
-        "ASPNETCORE_ENVIRONMENT": "Development",
-        "SKIP_TOOLING_ON_ERRORS": "true"
-      },
-      "applicationUrl": "https://localhost:64174;http://localhost:64175"
-    }
-  }
-}
-```
+For UI-only development without MCP tools, add `"SKIP_TOOLING_ON_ERRORS": "true"` to the
+profile's `environmentVariables` so MCP-load failures don't crash startup.
+
+> The file is gitignored after first-time force-tracking — your edits show in `git status`
+> but real bearer tokens must not be committed.
 
 ### 3. Run
 
