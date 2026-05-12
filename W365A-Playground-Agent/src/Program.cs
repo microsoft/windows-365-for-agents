@@ -78,8 +78,6 @@ builder.AddAgent<PlaygroundAgent>();
 // Custom Responses-API orchestrator. Singleton: holds per-conversation history in memory.
 builder.Services.AddSingleton<ResponsesOrchestrator>();
 
-// To enable transcript logging, see step-by-step-tutorial.md → "Key Files Reference" → Enable transcript logging.
-
 var app = builder.Build();
 
 if (app.Environment.IsDevelopment())

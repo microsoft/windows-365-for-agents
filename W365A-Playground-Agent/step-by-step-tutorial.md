@@ -2,6 +2,8 @@
 
 Step-by-step guide to set up, run, and deploy the Windows 365 for Agents Playground. Walks through local development, full A365 production setup, deployment to Azure App Service, and common troubleshooting.
 
+> **Verified** 2026-05-12 against Agent 365 CLI `1.1.176+f58fdbcd84`. If the CLI version on your machine is significantly newer, expect minor drift in command output and config schema; cross-check `a365 --version`.
+
 > For an overview of what this sample does and what you'll learn, see [README.md](README.md).
 
 ---
@@ -96,33 +98,31 @@ In Visual Studio, select **DevelopmentMode** from the debug profile dropdown. Th
 
 > **Faster path:** if you have GitHub Copilot, Claude Code, or another agent IDE, the official **[AI-guided setup](https://aka.ms/agent365enable)** automates the CLI install, blueprint creation, code instrumentation, and deployment in one prompt. The manual steps below are the equivalent path when you prefer running the CLI yourself.
 
-### One-time tenant setup (Global Admin required)
+### 1. Register a custom client app
+
+The `a365` CLI uses a dedicated Entra app registration to authenticate itself when managing agent blueprints in your tenant. Follow the official guide to create it and note the Client ID:
+
+- [Custom client app registration](https://learn.microsoft.com/en-us/microsoft-agent-365/developer/custom-client-app-registration)
+
+You'll be prompted for this Client ID by `a365 setup all` later in this flow.
+
+### 2. Install the CLI and authenticate (Global Admin required)
 
 ```powershell
 # Install CLI (first time)
-dotnet tool install --global Microsoft.Agents.A365.DevTools.Cli --prerelease
+dotnet tool install --global Microsoft.Agents.A365.DevTools.Cli
 
 # Update CLI (if already installed)
-dotnet tool update --global Microsoft.Agents.A365.DevTools.Cli --prerelease
+dotnet tool update --global Microsoft.Agents.A365.DevTools.Cli
 
 # Verify installation
 a365 -h
 
 # Authenticate
 az login
-
-# Initialize config (interactive wizard)
-cd src
-a365 setup all
 ```
 
-### Custom client app registration
-
-This is a dedicated Entra app the a365 CLI uses to authenticate itself when managing agent blueprints in your tenant. See official guide: https://learn.microsoft.com/en-us/microsoft-agent-365/developer/custom-client-app-registration
-
-When running `a365 setup all`, provide your custom client app Client ID when prompted.
-
-### Create `a365.config.json` from the templates
+### 3. Create `a365.config.json` from the templates
 
 > **Schema version**: the fields below match Agent 365 CLI `1.1.176+f58fdbcd84`.
 > If the CLI rejects your file with an unexpected validation error after a CLI update,
@@ -162,7 +162,7 @@ notepad a365.config.json
 `authMode`, if set, must be `obo`, `s2s`, or `both`. Everything else is optional with
 sensible defaults — see the [a365 CLI docs](https://learn.microsoft.com/microsoft-agent-365/developer/reference/cli/setup) for the full schema.
 
-### Setup blueprint + Azure resources
+### 4. Setup blueprint + Azure resources
 
 ```powershell
 a365 setup all
@@ -179,7 +179,7 @@ If you are not a Global Administrator, share the config folder with a GA and hav
 a365 setup admin --config-dir "<path-to-config-folder>"
 ```
 
-### Configure MCP tools
+### 5. Configure MCP tools
 
 ```powershell
 # See available MCP servers
@@ -216,7 +216,7 @@ a365 develop start-mock-tooling-server
 $env:MCP_PLATFORM_ENDPOINT = "http://localhost:5309"
 ```
 
-### Fill in appsettings.json
+### 6. Fill in appsettings.json
 
 `appsettings.json` must be filled with real values for production. **Do not commit this file with real credentials** — use Azure App Settings for deployed credentials.
 
@@ -255,14 +255,14 @@ https://<your-app>.azurewebsites.net/api/messages
 Do not put credentials in `appsettings.json` — it is committed to source control and included in the published output. Use Azure App Settings instead:
 
 ```powershell
-az webapp config appsettings set \
-  --name <app-name> --resource-group <rg> \
-  --settings \
-    "AIServices__AzureOpenAI__Endpoint=https://..." \
-    "AIServices__AzureOpenAI__ApiKey=..." \
-    "AIServices__AzureOpenAI__DeploymentName=..." \
-    "AIServices__AzureOpenAI__ApiVersion=..." \
-    "OpenWeatherApiKey=..." \
+az webapp config appsettings set `
+  --name <app-name> --resource-group <rg> `
+  --settings `
+    "AIServices__AzureOpenAI__Endpoint=https://..." `
+    "AIServices__AzureOpenAI__ApiKey=..." `
+    "AIServices__AzureOpenAI__DeploymentName=..." `
+    "AIServices__AzureOpenAI__ApiVersion=..." `
+    "OpenWeatherApiKey=..." `
     "Connections__ServiceConnection__Settings__ClientSecret=..."
 ```
 
@@ -309,15 +309,15 @@ Then activate the agent in Teams admin center to create the agent identity and m
 | Add an MCP server | `ToolingManifest.json` | `a365 develop add-mcp-servers <name>` |
 | Change welcome message | `Agent/PlaygroundAgent.cs` | `AgentWelcomeMessage` const |
 | Change LLM model/endpoint | `appsettings.json` | `AIServices:AzureOpenAI` section |
-| Enable transcript logging | `Program.cs` | Uncomment `TranscriptLoggerMiddleware` line |
-| Switch to OBO auth | `appsettings.json` | Comment `AgenticAuthHandlerName`, uncomment `OboAuthHandlerName` |
+| Enable transcript logging | `Program.cs` | Add `builder.Services.AddSingleton<IMiddleware[]>([new TranscriptLoggerMiddleware(new FileTranscriptLogger())]);` after `AddSingleton<ResponsesOrchestrator>()` |
+| Switch to OBO auth | `appsettings.json` | Set `AgentApplication:OboAuthHandlerName` to your OBO auth handler name (instead of, or alongside, `AgenticAuthHandlerName`) — the agent reads either key |
 | Use durable storage | `Program.cs` | Replace `MemoryStorage` with `CosmosDbPartitionedStorage` or `BlobsStorage` |
 
 ### Environment variables
 
 | Variable | Purpose | Dev value |
 |---|---|---|
-| `ASPNETCORE_ENVIRONMENT` | Selects `appsettings.{Env}.json` | `Development` or `Playground` |
+| `ASPNETCORE_ENVIRONMENT` | Selects `appsettings.{Env}.json` | `Development` locally; `Production` (the implicit default) in Azure App Service |
 | `BEARER_TOKEN` | Bypasses JWT auth for tool calls (dev only) | Any string |
 | `SKIP_TOOLING_ON_ERRORS` | Don't fail if MCP unavailable | `true` |
 | `ENABLE_A365_OBSERVABILITY_EXPORTER` | Export traces to A365 service | `false` (console only) |
