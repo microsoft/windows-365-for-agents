@@ -11,7 +11,7 @@
 
 
 [![Status](https://img.shields.io/badge/status-public%20preview-blue)](https://learn.microsoft.com/en-us/windows-365/public-preview)
-[![License: MIT](https://img.shields.io/badge/license-CC--BY--4.0-blue.svg)](./LICENSE)
+[![Docs: CC-BY-4.0](https://img.shields.io/badge/docs-CC--BY--4.0-blue.svg)](./LICENSE.md) [![Code: MIT](https://img.shields.io/badge/code-MIT-blue.svg)](./W365A-Playground-Agent/LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![MCP](https://img.shields.io/badge/protocol-MCP-purple)](https://modelcontextprotocol.io)
 
@@ -192,4 +192,4 @@ See [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) for details.
 
 ## License
 
-This project is licensed under the [MIT License](./LICENSE).
+Documentation (this repo's docs, README, images, and other non-code assets) is licensed under [CC-BY-4.0](./LICENSE.md). The code in [`W365A-Playground-Agent/`](./W365A-Playground-Agent/) is licensed under the [MIT License](./W365A-Playground-Agent/LICENSE).

@@ -3,6 +3,7 @@
 
 using Microsoft.W365APlaygroundAgent;
 using Microsoft.W365APlaygroundAgent.Agent;
+using Microsoft.W365APlaygroundAgent.Auth;
 using Microsoft.W365APlaygroundAgent.ComputerUse;
 using Microsoft.W365APlaygroundAgent.Telemetry;
 using Microsoft.W365APlaygroundAgent.Throttling;
@@ -19,8 +20,6 @@ using Microsoft.Agents.Hosting.AspNetCore;
 using Microsoft.Agents.Storage;
 using Microsoft.Agents.Storage.Transcript;
 using System.Reflection;
-
-
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -47,7 +46,7 @@ builder.Services.AddSingleton<IMcpToolRegistrationService, McpToolRegistrationSe
 builder.Services.AddSingleton<IMcpToolServerConfigurationService, McpToolServerConfigurationService>();
 
 // Per-user turn quota: 100 turns per rolling 24h, in-memory. Singleton so state is shared
-// across the (transient) MyAgent instances. For multi-instance production, back this with
+// across the (transient) PlaygroundAgent instances. For multi-instance production, back this with
 // a distributed store (AzureTableStorage or Redis) so counts are shared across instances.
 builder.Services.AddSingleton<IUserTurnLimiter, UserTurnLimiter>();
 
@@ -79,13 +78,12 @@ builder.Services.AddSingleton<IStorage, MemoryStorage>();
 builder.AddAgentApplicationOptions();
 
 // The agent itself. Transient: a new instance per turn.
-builder.AddAgent<MyAgent>();
+builder.AddAgent<PlaygroundAgent>();
 
 // Custom Responses-API orchestrator. Singleton: holds per-conversation history in memory.
 builder.Services.AddSingleton<ResponsesOrchestrator>();
 
-// To enable transcript logging, uncomment below. See SETUP.md for details.
-// builder.Services.AddSingleton<Microsoft.Agents.Builder.IMiddleware[]>([new TranscriptLoggerMiddleware(new FileTranscriptLogger())]);
+// To enable transcript logging, see step-by-step-tutorial.md → "Key Files Reference" → Enable transcript logging.
 
 var app = builder.Build();
 
@@ -99,7 +97,6 @@ app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 
-
 // Map the /api/messages endpoint to the AgentApplication.
 // RequireRateLimiting attaches the "messagesGlobal" policy declared above.
 app.MapPost("/api/messages", async (HttpRequest request, HttpResponse response, IAgentHttpAdapter adapter, IAgent agent, CancellationToken cancellationToken) =>
@@ -111,17 +108,17 @@ app.MapPost("/api/messages", async (HttpRequest request, HttpResponse response, 
 }).RequireRateLimiting("messagesGlobal");
 
 // Health check endpoint for CI/CD pipelines and monitoring
-app.MapGet("/api/health", () => Results.Ok(new { status = "healthy", timestamp = System.DateTime.UtcNow }));
+app.MapGet("/api/health", () => Results.Ok(new { status = "healthy", timestamp = DateTime.UtcNow }));
 
-if (app.Environment.IsDevelopment() || app.Environment.EnvironmentName == "Playground")
+if (app.Environment.IsDevelopment())
 {
-    app.MapGet("/", () => "W365A Playground Agent");
+    app.MapGet("/", () => "Windows 365 for Agents Playground");
     app.UseDeveloperExceptionPage();
     app.MapControllers().AllowAnonymous();
 
     // Hard coded for brevity and ease of testing. 
     // In production, this should be set in configuration.
-    app.Urls.Add($"http://localhost:3978");
+    app.Urls.Add("http://localhost:3978");
 }
 else
 {

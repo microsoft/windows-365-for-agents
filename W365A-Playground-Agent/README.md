@@ -1,4 +1,4 @@
-# W365A Playground Agent
+# Windows 365 for Agents Playground
 
 A .NET 8 sample agent that drives a [Windows 365](https://learn.microsoft.com/en-us/windows-365/)
 Cloud PC via natural language. Built on the
@@ -10,18 +10,17 @@ registration — with the **`mcp_W365ComputerUse`** MCP server wired up so the a
 screenshots, click, type, and run shell commands inside a Cloud PC.
 
 > **➡ For the complete step-by-step setup, deploy, and troubleshooting walkthrough,
-> see [SETUP.md](SETUP.md).**
+> see [step-by-step-tutorial.md](step-by-step-tutorial.md).**
 
 ## What you'll learn
 
 By following this sample end-to-end, you will:
 
-- Build an agent on the Microsoft 365 Agents SDK and run it locally in Agents Playground.
+- Build an agent on the Microsoft 365 Agents SDK and run it locally for debugging.
 - Wire up the `mcp_W365ComputerUse` MCP tool so your agent can drive a Windows 365 Cloud PC.
 - Forward Cloud PC screenshots back to the user as message attachments while the model
   reasons over them.
-- Run two auth modes: `ClientSecret` for local Playground testing,
-  `UserManagedIdentity` for A365 production.
+- Use `UserManagedIdentity` auth in A365 production (managed identity + Federated Identity Credential).
 - Cap abuse with a **two-gate throttle**: 50 req/s global HTTP rate limit + per-user
   100 turns / 24 h rolling quota — so a runaway script can't burn unbounded LLM tokens.
 - Use the **`a365` CLI** to provision the agent blueprint, grant permissions, and deploy
@@ -32,15 +31,15 @@ By following this sample end-to-end, you will:
 | Goal | What you need |
 |---|---|
 | Compile and run locally (no Cloud PC) | .NET 8 SDK, Azure OpenAI resource, OpenWeather API key |
-| Send messages via Agents Playground | + Azure Bot registration |
+| Full A365 production deployment | + Azure subscription, [`a365` CLI](https://learn.microsoft.com/en-us/microsoft-agent-365/developer/agent-365-cli), Entra tenant admin (or Agent ID Developer role) |
 | Full Cloud PC computer use | + [Agent 365 Frontier Program](https://adoption.microsoft.com/copilot/frontier-program/) enrollment + provisioned [Windows 365 Cloud PC agent pool](../docs/cloud-pc-pools.md) |
 
-For exact versions, links, and the full prerequisite list, see [SETUP.md](SETUP.md).
+For exact versions, links, and the full prerequisite list, see [step-by-step-tutorial.md](step-by-step-tutorial.md).
 
 ## Quick start
 
 This gets the agent process running locally. To actually send it messages, you need the
-rest of the setup in [SETUP.md](SETUP.md).
+rest of the setup in [step-by-step-tutorial.md](step-by-step-tutorial.md).
 
 ```powershell
 cd src
@@ -49,6 +48,7 @@ cd src
 dotnet user-secrets set "AIServices:AzureOpenAI:Endpoint"       "https://<your-resource>.openai.azure.com/"
 dotnet user-secrets set "AIServices:AzureOpenAI:ApiKey"         "<your-api-key>"
 dotnet user-secrets set "AIServices:AzureOpenAI:DeploymentName" "<your-deployment-name>"
+dotnet user-secrets set "AIServices:AzureOpenAI:ApiVersion"     "<your-api-version>"
 dotnet user-secrets set "OpenWeatherApiKey"                      "<your-openweather-key>"
 dotnet user-secrets set "TokenValidation:Enabled"                "false"
 
@@ -65,9 +65,9 @@ The agent listens on `http://localhost:3978/api/messages`.
 | Stack layer | Component | What it does |
 |---|---|---|
 | Hosting | `Microsoft.Agents.Hosting.AspNetCore` | Bot Framework adapter, Teams / Playground channel |
-| Agent | `MyAgent : AgentApplication` (`src/Agent/MyAgent.cs`) | Turn handlers, install/uninstall, welcome message |
+| Agent | `PlaygroundAgent : AgentApplication` (`src/Agent/PlaygroundAgent.cs`) | Turn handlers, install/uninstall, welcome message |
 | LLM loop | `ResponsesOrchestrator` (`src/ComputerUse/`) | OpenAI Responses API, tool-call dispatch, screenshot forwarding |
-| Tools | `src/Tools/` + `ToolingManifest.json` | Local tools (weather, datetime) + MCP servers (`mcp_W365ComputerUse`, etc.) |
+| Tools | `src/LocalTools/` + `ToolingManifest.json` | Local tools (weather, datetime) + MCP servers (`mcp_W365ComputerUse`, etc.) |
 | Throttling | `src/Throttling/` | Per-user turn quota (100 / 24h) + global HTTP rate limit (50 / s) on `/api/messages` |
 | Platform | `Microsoft.Agents.A365.*` | Agent blueprint, MCP tooling, observability |
 
@@ -109,27 +109,27 @@ All knobs are constants in code — no `appsettings.json` entries:
 ```
 W365A-Playground-Agent/
 ├── README.md                          ← you are here
-├── SETUP.md                           ← step-by-step setup, deploy, troubleshoot
+├── step-by-step-tutorial.md           ← step-by-step setup, deploy, troubleshoot
 ├── W365APlaygroundAgent.sln
 ├── .gitignore                         ← C#-specific ignore rules
 └── src/
     ├── W365APlaygroundAgent.csproj
     ├── Program.cs                     ← DI + endpoint mapping
-    ├── Agent/MyAgent.cs               ← agent logic
+    ├── Agent/PlaygroundAgent.cs       ← agent logic
     ├── ComputerUse/                   ← Responses API + screenshot forwarding
-    ├── Tools/                         ← local tools (weather, datetime)
+    ├── LocalTools/                    ← local tools (weather, datetime)
     ├── Throttling/                    ← per-user turn quota + global HTTP rate limit
     ├── Telemetry/                     ← OpenTelemetry + A365 observability
     ├── appsettings.json               ← <<PLACEHOLDER>> values
-    ├── appsettings.Playground.json    ← <<PLACEHOLDER>> values
     ├── ToolingManifest.json           ← MCP server declarations
     └── appPackage/manifest.json       ← Teams app manifest
 ```
 
 ## Documentation
 
-- **[SETUP.md](SETUP.md)** — complete step-by-step setup, deploy, common issues
+- **[step-by-step-tutorial.md](step-by-step-tutorial.md)** — full setup, deploy, common issues
 - **[Windows 365 for Agents docs](../docs/)** — platform reference (sessions, MCP tools, screen sharing)
+- **[Windows 365 for Agents MCP server reference](https://learn.microsoft.com/en-us/microsoft-agent-365/mcp-server-reference/windows-365-agents)** — full tool list for the W365 MCP server
 - [Microsoft Agent 365 Developer Docs](https://learn.microsoft.com/en-us/microsoft-agent-365/developer/)
 - [Microsoft 365 Agents SDK](https://learn.microsoft.com/en-us/microsoft-365/agents-sdk/)
 - [Microsoft Agent Framework](https://learn.microsoft.com/en-us/agent-framework/)

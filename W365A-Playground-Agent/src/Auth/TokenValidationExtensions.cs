@@ -12,20 +12,17 @@ using System.Collections.Concurrent;
 using System.Globalization;
 using System.IdentityModel.Tokens.Jwt;
 
-namespace Microsoft.W365APlaygroundAgent;
+namespace Microsoft.W365APlaygroundAgent.Auth;
 
-public static class AspNetExtensions
+public static class TokenValidationExtensions
 {
     private static readonly ConcurrentDictionary<string, ConfigurationManager<OpenIdConnectConfiguration>> _openIdMetadataCache = new();
 
     /// <summary>
-    /// Adds token validation typical for ABS/SMBA and Bot-to-bot.
-    /// default to Azure Public Cloud.
+    /// Adds JWT token validation typical for ABS/SMBA and agent-to-agent traffic.
+    /// Defaults to Azure Public Cloud when <c>IsGov</c> / <c>ValidIssuers</c> are unset.
     /// </summary>
-    /// <param name="services"></param>
-    /// <param name="configuration"></param>
-    /// <param name="tokenValidationSectionName">Name of the config section to read.</param>
-    /// <param name="logger">Optional logger to use for authentication event logging.</param>
+    /// <param name="tokenValidationSectionName">Name of the config section to read (default <c>"TokenValidation"</c>).</param>
     /// <remarks>
     /// Configuration:
     /// <code>
@@ -161,7 +158,7 @@ public static class AspNetExtensions
                         return;
                     }
 
-                    string[] parts = authorizationHeader?.Split(' ')!;
+                    string[] parts = authorizationHeader.Split(' ');
                     if (parts.Length != 2 || parts[0] != "Bearer")
                     {
                         // Default to AadTokenValidation handling

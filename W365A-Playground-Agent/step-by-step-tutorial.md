@@ -1,6 +1,6 @@
-# W365A Playground Agent — Setup Guide
+# Windows 365 for Agents Playground — Setup Guide
 
-Step-by-step guide to set up, run, and deploy the W365A Playground Agent. Walks through local development, Agents Playground testing, full A365 production setup, deployment to Azure App Service, and common troubleshooting.
+Step-by-step guide to set up, run, and deploy the Windows 365 for Agents Playground. Walks through local development, full A365 production setup, deployment to Azure App Service, and common troubleshooting.
 
 > For an overview of what this sample does and what you'll learn, see [README.md](README.md).
 
@@ -21,27 +21,27 @@ Step-by-step guide to set up, run, and deploy the W365A Playground Agent. Walks 
 ```
 W365A-Playground-Agent/
 ├── README.md                       ← overview + quick start
-├── SETUP.md                        ← this file (step-by-step setup, deploy, troubleshoot)
+├── step-by-step-tutorial.md        ← this file (step-by-step setup, deploy, troubleshoot)
 ├── W365APlaygroundAgent.sln
 ├── .gitignore                      ← C#-specific ignore rules
 └── src/
     ├── W365APlaygroundAgent.csproj
     ├── Program.cs                   ← entry point, DI setup, endpoint mapping
     ├── appsettings.json             ← production config template (placeholders)
-    ├── appsettings.Playground.json  ← local testing config (JWT disabled, ClientSecret)
     ├── ToolingManifest.json         ← MCP server declarations
     ├── Agent/
-    │   └── MyAgent.cs               ← main agent logic
-    ├── Tools/
-    │   ├── WeatherLookupTool.cs     ← OpenWeather API integration
-    │   └── DateTimeFunctionTool.cs  ← local datetime utility
+    │   └── PlaygroundAgent.cs       ← main agent logic
+    ├── LocalTools/
+    │   ├── WeatherTool.cs           ← OpenWeather API integration
+    │   └── DateTimeTool.cs          ← local datetime utility
     ├── ComputerUse/
     │   └── ResponsesOrchestrator.cs ← Responses API agentic loop with screenshot forwarding
     ├── Telemetry/
-    │   ├── AgentOTELExtensions.cs   ← OpenTelemetry configuration
-    │   ├── AgentMetrics.cs          ← custom counters/histograms
-    │   └── A365OtelWrapper.cs       ← A365 observability bridge
-    ├── AspNetExtensions.cs          ← JWT validation
+    │   ├── OpenTelemetryExtensions.cs   ← OpenTelemetry configuration
+    │   ├── AgentMetrics.cs              ← custom counters/histograms
+    │   └── A365OtelWrapper.cs           ← A365 observability bridge
+    ├── Auth/
+    │   └── TokenValidationExtensions.cs  ← JWT validation
     └── appPackage/
         └── manifest.json            ← Teams app manifest
 ```
@@ -50,7 +50,7 @@ W365A-Playground-Agent/
 
 ## Local Development (Quickest Path)
 
-This gets the agent process running locally. Note: **sending messages via Agents Playground requires an Azure Bot registration** (see Playground Mode below) — the M365 Agents SDK adapter validates the Bot Framework token sent by the Playground, which requires real credentials.
+This gets the agent process running locally so you can debug startup, MCP tool loading, and turn handlers. To actually chat with the agent over a real channel, you need the full A365 production setup further down — the M365 Agents SDK adapter validates Bot Framework / agentic tokens that a bare local run can't easily provide.
 
 ### 1. Set user secrets
 
@@ -60,6 +60,7 @@ cd src
 dotnet user-secrets set "AIServices:AzureOpenAI:Endpoint"       "https://<your-resource>.openai.azure.com/"
 dotnet user-secrets set "AIServices:AzureOpenAI:ApiKey"         "<your-api-key>"
 dotnet user-secrets set "AIServices:AzureOpenAI:DeploymentName" "<your-deployment-name>"
+dotnet user-secrets set "AIServices:AzureOpenAI:ApiVersion"     "<your-api-version>"
 dotnet user-secrets set "OpenWeatherApiKey"                      "<your-openweather-key>"
 dotnet user-secrets set "TokenValidation:Enabled"                "false"
 ```
@@ -82,14 +83,6 @@ dotnet user-secrets set "TokenValidation:Enabled"                "false"
         "SKIP_TOOLING_ON_ERRORS": "true"
       },
       "applicationUrl": "https://localhost:64174;http://localhost:64175"
-    },
-    "PlaygroundMode": {
-      "commandName": "Project",
-      "launchBrowser": true,
-      "environmentVariables": {
-        "ASPNETCORE_ENVIRONMENT": "Playground"
-      },
-      "applicationUrl": "https://localhost:64174;http://localhost:64175"
     }
   }
 }
@@ -104,69 +97,6 @@ dotnet run --project src --launch-profile DevelopmentMode
 In Visual Studio, select **DevelopmentMode** from the debug profile dropdown. The agent listens on `http://localhost:3978`.
 
 > **Note on `BEARER_TOKEN`**: This env var is for **tool authentication** inside the agent (getting tokens to call MCP servers), not for validating incoming HTTP requests. It does not bypass the M365 Agents SDK adapter's token validation. Setting it via `dotnet user-secrets` also has no effect — `TryGetBearerTokenForDevelopment` reads from `Environment.GetEnvironmentVariable("BEARER_TOKEN")` (OS env var only, not IConfiguration).
-
----
-
-## Playground Mode (With Azure Bot Registration)
-
-Playground mode uses `appsettings.Playground.json` which disables JWT validation and uses a ClientSecret for the bot connection. **This is the minimum required to send messages via Agents Playground** — the M365 Agents SDK adapter validates the Bot Framework token sent by the Playground, which requires a real `ClientId`/`ClientSecret`.
-
-### 1. Create an Azure Bot registration
-
-Create a free Azure Bot resource in the [Azure Portal](https://portal.azure.com). From the app registration:
-- Copy the **Client ID** from the Overview page
-- Generate a **Client Secret** under Certificates & secrets → New client secret
-
-### 2. Fill in appsettings.Playground.json
-
-Replace the placeholder values:
-
-```json
-{
-  "TokenValidation": {
-    "Enabled": false,
-    "Audiences": ["<azure-bot-client-id>"],
-    "TenantId": "<your-tenant-id>"
-  },
-  "Connections": {
-    "ServiceConnection": {
-      "Settings": {
-        "AuthType": "ClientSecret",
-        "ClientId": "<azure-bot-client-id>",
-        "ClientSecret": "<azure-bot-client-secret>",
-        "AuthorityEndpoint": "https://login.microsoftonline.com/<your-tenant-id>"
-      }
-    }
-  },
-  "AIServices": {
-    "AzureOpenAI": {
-      "DeploymentName": "<deployment-name>",
-      "Endpoint": "https://<resource>.openai.azure.com/",
-      "ApiKey": "<api-key>"
-    }
-  },
-  "OpenWeatherApiKey": "<openweather-key>"
-}
-```
-
-> Do not commit this file with real values. Either use user secrets to override or add to `.gitignore`.
-
-### 3. Run in Playground environment
-
-```powershell
-dotnet run --project src --launch-profile PlaygroundMode
-```
-
-The `PlaygroundMode` launch profile sets `ASPNETCORE_ENVIRONMENT=Playground` automatically, which loads `appsettings.Playground.json`. In Visual Studio, select **PlaygroundMode** from the debug profile dropdown.
-
-### 4. Test with Agents Playground
-
-```powershell
-npm install -g @microsoft/teams-app-test-tool
-teamsapptester
-```
-
-Opens `http://localhost:56150`. Connect to `http://localhost:3978/api/messages`.
 
 ---
 
@@ -301,7 +231,7 @@ $env:MCP_PLATFORM_ENDPOINT = "http://localhost:5309"
 | Field | Value source | Notes |
 |---|---|---|
 | `TokenValidation:Audiences` | Azure Bot Client ID | Must match the `aud` claim in Bot Framework JWTs |
-| `Connections:ServiceConnection:AuthType` | `UserManagedIdentity` | For production; use `ClientSecret` for Playground mode |
+| `Connections:ServiceConnection:AuthType` | `UserManagedIdentity` | For production; override to `ClientSecret` via user-secrets for local dev |
 | `Connections:ServiceConnection:ClientId` | Blueprint ID from `a365.generated.config.json` → `agentBlueprintId` | |
 | `Connections:ServiceConnection:AuthorityEndpoint` | `https://login.microsoftonline.com/<tenantId>` | |
 | `AgentApplication:AgenticAuthHandlerName` | `"agentic"` | Agent authenticates as itself (app-level token) |
@@ -337,6 +267,7 @@ az webapp config appsettings set \
     "AIServices__AzureOpenAI__Endpoint=https://..." \
     "AIServices__AzureOpenAI__ApiKey=..." \
     "AIServices__AzureOpenAI__DeploymentName=..." \
+    "AIServices__AzureOpenAI__ApiVersion=..." \
     "OpenWeatherApiKey=..." \
     "Connections__ServiceConnection__Settings__ClientSecret=..."
 ```
@@ -379,10 +310,10 @@ Then activate the agent in Teams admin center to create the agent identity and m
 
 | Goal | File | What to modify |
 |---|---|---|
-| Change system prompt / personality | `Agent/MyAgent.cs` | `AgentInstructionsTemplate` const |
-| Add a local tool | `Tools/` | New class, register in `MyAgent.cs` with `AIFunctionFactory.Create()` |
+| Change system prompt / personality | `Agent/PlaygroundAgent.cs` | `AgentInstructionsTemplate` const |
+| Add a local tool | `LocalTools/` | New class, register in `PlaygroundAgent.cs` with `AIFunctionFactory.Create()` |
 | Add an MCP server | `ToolingManifest.json` | `a365 develop add-mcp-servers <name>` |
-| Change welcome message | `Agent/MyAgent.cs` | `AgentWelcomeMessage` const |
+| Change welcome message | `Agent/PlaygroundAgent.cs` | `AgentWelcomeMessage` const |
 | Change LLM model/endpoint | `appsettings.json` | `AIServices:AzureOpenAI` section |
 | Enable transcript logging | `Program.cs` | Uncomment `TranscriptLoggerMiddleware` line |
 | Switch to OBO auth | `appsettings.json` | Comment `AgenticAuthHandlerName`, uncomment `OboAuthHandlerName` |
@@ -407,8 +338,6 @@ Then activate the agent in Teams admin center to create the agent identity and m
 |---|---|---|---|
 | `/api/messages` | POST | JWT required | Main bot message endpoint |
 | `/api/health` | GET | None | Health check (returns `{ status, timestamp }`) |
-| `/health` | GET | None | Aspire health checks (dev-only) |
-| `/alive` | GET | None | Liveness check (dev-only) |
 
 ---
 
@@ -416,9 +345,6 @@ Then activate the agent in Teams admin center to create the agent identity and m
 
 **`TokenValidationOptions:Audiences values must be a GUID` on startup**
 → `appsettings.json` still has the `{{ClientId}}` placeholder. Disable validation instead: `dotnet user-secrets set "TokenValidation:Enabled" "false"`.
-
-**`IDX12709: CanReadToken() returned false. JWT is not well formed` in Agents Playground**
-→ The M365 Agents SDK adapter validates the Bot Framework token sent by the Playground. With placeholder credentials in `Connections:ServiceConnection`, this fails. Solution: fill in `appsettings.Playground.json` with real Azure Bot `ClientId`/`ClientSecret` and run with `ASPNETCORE_ENVIRONMENT=Playground`.
 
 **Agent starts but returns 401 on messages**
 → Set `BEARER_TOKEN` env var, or check `TokenValidation:Audiences` in config matches your bot client ID.

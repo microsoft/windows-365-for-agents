@@ -34,6 +34,11 @@ public sealed class ResponsesOrchestrator
     }
 
     private const int MaxConversations = 100;
+
+    // W365 MCP V1 returns image content in a JSON envelope without media-type metadata;
+    // we know empirically those bytes are JPEG.
+    private const string LegacyImageMimeType = "image/jpeg";
+
     private readonly ConcurrentDictionary<string, ConversationState> _conversations = new();
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -91,7 +96,7 @@ public sealed class ResponsesOrchestrator
         // example, mcp_OneDriveRemoteServer and mcp_SharePointRemoteServer both expose
         // "getFileOrFolderMetadataByUrl"; whichever appears first in the manifest wins.
         // Server-name prefixing would require per-server loading and a custom AIFunction wrapper in
-        // MyAgent.cs — the server origin is not available here after GetMcpToolsAsync flattens
+        // PlaygroundAgent.cs — the server origin is not available here after GetMcpToolsAsync flattens
         // the tool list.
         var toolsByName = tools.OfType<AIFunction>()
             .GroupBy(t => t.Name)
@@ -136,7 +141,7 @@ public sealed class ResponsesOrchestrator
                 // reasoning: skip
             }
 
-            _logger.LogInformation("Model returned {Messages} message(s), {Calls} function_call(s)",
+            _logger.LogDebug("Model returned {Messages} message(s), {Calls} function_call(s)",
                 response.Output.Count(o => o.GetProperty("type").GetString() == "message"),
                 functionCalls.Count);
 
@@ -216,10 +221,10 @@ public sealed class ResponsesOrchestrator
                 string s => s,
                 _ => JsonSerializer.Serialize(result, JsonOptions)
             };
-            if (resultStr.Length <= 2000)
-                _logger.LogInformation("Tool '{Name}' result={ResultLen}chars: {Result}", func.Name, resultStr.Length, resultStr);
-            else
-                _logger.LogInformation("Tool '{Name}' result={ResultLen}chars", func.Name, resultStr.Length);
+            // Log length at Info (narrative); full body at Debug only — body may contain user data.
+            _logger.LogInformation("Tool '{Name}' result={ResultLen}chars", func.Name, resultStr.Length);
+            if (_logger.IsEnabled(LogLevel.Debug) && resultStr.Length <= 2000)
+                _logger.LogDebug("Tool '{Name}' result body: {Result}", func.Name, resultStr);
             history.Add(MakeFunctionCallOutput(callId, resultStr));
         }
     }
@@ -245,7 +250,7 @@ public sealed class ResponsesOrchestrator
         };
 
         var json = JsonSerializer.Serialize(requestBody, JsonOptions);
-        _logger.LogInformation("Responses API request: {Chars} chars, {InputItems} input items", json.Length, input.Count);
+        _logger.LogDebug("Responses API request: {Chars} chars, {InputItems} input items", json.Length, input.Count);
 
         const int maxAttempts = 4;
         for (int attempt = 1; attempt <= maxAttempts; attempt++)
@@ -262,7 +267,7 @@ public sealed class ResponsesOrchestrator
             {
                 var parsed = JsonSerializer.Deserialize<ResponsesResponse>(responseJson, JsonOptions)
                     ?? throw new InvalidOperationException("Null Responses API response.");
-                _logger.LogInformation("Responses API OK: {OutputItems} output items", parsed.Output.Count);
+                _logger.LogDebug("Responses API OK: {OutputItems} output items", parsed.Output.Count);
                 return parsed;
             }
 
@@ -335,14 +340,14 @@ public sealed class ResponsesOrchestrator
             {
                 using var doc = JsonDocument.Parse(s);
                 var b64 = SearchJsonForBase64(doc.RootElement);
-                if (b64 != null) return (b64, "image/jpeg"); // Legacy JSON-string format (W365 MCP V1); image is JPEG.
+                if (b64 != null) return (b64, LegacyImageMimeType);
             }
             catch (JsonException) { /* Not JSON; no embedded image to extract. */ }
         }
         if (result is JsonElement je)
         {
             var b64 = SearchJsonForBase64(je);
-            if (b64 != null) return (b64, "image/jpeg"); // Legacy JSON-string format (W365 MCP V1); image is JPEG.
+            if (b64 != null) return (b64, LegacyImageMimeType);
         }
         return null;
     }

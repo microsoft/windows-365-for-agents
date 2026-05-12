@@ -10,6 +10,11 @@ namespace Microsoft.W365APlaygroundAgent.Throttling;
 /// <see cref="WindowHours"/>-hour window. State is in-memory and resets on App Service restart.
 /// For a multi-instance production deployment, back this with AzureTableStorage or Redis so
 /// per-user counts are shared across instances.
+///
+/// Algorithm — each user has a FIFO queue of UTC timestamps, one per consumed turn. On every
+/// call, timestamps older than the window are pruned from the head; if the remaining queue is
+/// at the cap, the request is denied, otherwise a new timestamp is enqueued at the tail.
+/// Locking is per-queue rather than global so concurrent users do not contend on a single hot lock.
 /// </summary>
 public class UserTurnLimiter : IUserTurnLimiter
 {
