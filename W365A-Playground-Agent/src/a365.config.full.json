@@ -1,0 +1,28 @@
+{
+  "tenantId": "<<TenantId>>",
+  "clientAppId": "<<ClientAppId>>",
+  "environment": "prod",
+  "messagingEndpoint": "<<MessagingEndpoint>>",
+  "graphBaseUrl": "https://graph.microsoft.com",
+  "authMode": "both",
+
+  "aiTeammate": true,
+  "useBlueprint": false,
+
+  "agentIdentityDisplayName": "<<AgentIdentityDisplayName>>",
+  "agentBlueprintDisplayName": "<<AgentBlueprintDisplayName>>",
+  "agentUserPrincipalName": "<<AgentUserPrincipalName>>",
+  "agentUserDisplayName": "<<AgentUserDisplayName>>",
+  "managerEmail": "<<ManagerEmail>>",
+  "agentUserUsageLocation": "US",
+  "deploymentProjectPath": ".",
+  "agentDescription": "<<AgentDescription>>",
+
+  "needAzureOpenAI": false,
+  "azureOpenAIName": "<<AzureOpenAIName>>",
+  "azureOpenAILocation": "<<AzureOpenAILocation>>",
+  "azureOpenAIModelDeploymentName": "<<AzureOpenAIModelDeploymentName>>",
+
+  "mcpDefaultServers": [],
+  "customBlueprintPermissions": []
+}

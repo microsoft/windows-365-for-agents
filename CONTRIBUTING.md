@@ -10,7 +10,7 @@ Found a bug or have a feature request? [Open an issue](../../issues/new) with as
 
 - Steps to reproduce (for bugs)
 - Expected vs. actual behavior
-- Environment details (OS, Python version, SDK version)
+- Environment details (OS, .NET version, Python version, Agent 365 SDK version — whichever applies)
 - Relevant logs or screenshots
 
 ### Suggesting Improvements
