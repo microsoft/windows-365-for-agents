@@ -226,18 +226,28 @@ public class PlaygroundAgent : AgentApplication
         // (no real Teams caller in that flow). A blocked user sees a friendly text reply.
         if (!TryGetBearerTokenForDevelopment(out _))
         {
-            var quotaOid = fromAccount?.AadObjectId;
-            if (!_turnLimiter.TryConsume(quotaOid, out var turnCount))
+            // Use AadObjectId when present; fall back to channel-specific From.Id for activity
+            // types (e.g. email) that don't carry an Entra OID. If neither is present, skip the
+            // per-user quota and rely on the global HTTP rate limiter — "can't measure" should
+            // not equal "blocked".
+            var quotaKey = fromAccount?.AadObjectId ?? fromAccount?.Id;
+            if (string.IsNullOrEmpty(quotaKey))
             {
-                _logger.LogWarning("TurnLimit: BLOCKED — OID={OID} count={Count}",
-                    quotaOid ?? "(null)", turnCount);
+                _logger.LogDebug("TurnLimit: skipped — no caller identity on activity (channel: {Channel})",
+                    turnContext.Activity.ChannelId);
+            }
+            else if (!_turnLimiter.TryConsume(quotaKey, out var turnCount))
+            {
+                _logger.LogWarning("TurnLimit: BLOCKED — caller={Caller} count={Count}", quotaKey, turnCount);
                 await turnContext.SendActivityAsync(
                     MessageFactory.Text("You've reached the usage limit (100 turns per 24h). Please try again later."),
                     cancellationToken);
                 return;
             }
-            _logger.LogDebug("TurnLimit: {Count}/100 (24h) for OID={OID}",
-                turnCount, quotaOid ?? "(null)");
+            else
+            {
+                _logger.LogDebug("TurnLimit: {Count}/100 (24h) for caller={Caller}", turnCount, quotaKey);
+            }
         }
 
         // Agentic requests use the agentic auth handler; everything else (Playground, WebChat) uses OBO.

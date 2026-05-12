@@ -4,7 +4,7 @@
   "environment": "prod",
   "messagingEndpoint": "<<MessagingEndpoint>>",
   "graphBaseUrl": "https://graph.microsoft.com",
-  "authMode": "obo",
+  "authMode": "both",
 
   "aiTeammate": true,
   "useBlueprint": false,

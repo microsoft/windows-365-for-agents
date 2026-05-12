@@ -44,18 +44,23 @@ rest of the setup in [step-by-step-tutorial.md](step-by-step-tutorial.md).
 ```powershell
 cd src
 
-# Local secrets (stay on your machine, never committed)
-dotnet user-secrets set "AIServices:AzureOpenAI:Endpoint"       "https://<your-resource>.openai.azure.com/"
-dotnet user-secrets set "AIServices:AzureOpenAI:ApiKey"         "<your-api-key>"
-dotnet user-secrets set "AIServices:AzureOpenAI:DeploymentName" "<your-deployment-name>"
-dotnet user-secrets set "AIServices:AzureOpenAI:ApiVersion"     "<your-api-version>"
-dotnet user-secrets set "OpenWeatherApiKey"                      "<your-openweather-key>"
-dotnet user-secrets set "TokenValidation:Enabled"                "false"
+# Local secrets (stay on your machine, never committed).
+# Non-secret config (Endpoint, DeploymentName, ApiVersion, TokenValidation:Enabled) is set in
+# src/appsettings.json (placeholders) and src/Properties/launchSettings.json (env vars).
+dotnet user-secrets set "AIServices:AzureOpenAI:ApiKey" "<your-api-key>"
+dotnet user-secrets set "OpenWeatherApiKey"             "<your-openweather-key>"
 
-# Run
-$env:ASPNETCORE_ENVIRONMENT  = "Development"
-$env:SKIP_TOOLING_ON_ERRORS  = "true"
-dotnet run
+# Before running: open src/appsettings.json. The <<…>> placeholders fall into 3 buckets:
+#   - <<agentBlueprintId>>, <<tenantId>>, <<Connections__ServiceConnection__Settings__ClientSecret>>
+#     → automatically stamped by 'a365 setup all'.
+#     Never commit the real ClientSecret; restore the <<…>> placeholder before 'git commit'.
+#   - <<AIServices__AzureOpenAI__ApiKey>> and <<openweatherApiKey>>
+#     → resolved from the user-secrets you just set. Leave as <<…>>.
+# Additionally: AIServices:AzureOpenAI ships with Microsoft demo DeploymentName/Endpoint/
+# ApiVersion. If you have your own Azure OpenAI resource, replace those three.
+
+# Run (uses the DevelopmentMode profile in Properties/launchSettings.json)
+dotnet run --launch-profile DevelopmentMode
 ```
 
 The agent listens on `http://localhost:3978/api/messages`.
@@ -93,25 +98,7 @@ generating hundreds of LLM calls in minutes).
 
 Both gates skip automatically in `BEARER_TOKEN` development mode.
 
-### Caveats
-
-- **In-memory state.** The per-user quota resets when the App Service restarts — anyone
-  over the cap is unblocked. For a multi-instance production deployment, replace
-  `UserTurnLimiter` with one backed by AzureTableStorage or Redis so per-user counts
-  are shared across instances.
-- **Quota response is a text reply, not HTTP 429.** Only the global rate limiter returns
-  429. The quota gate sends a human-readable message back through Teams.
-
-### Tuning
-
-All knobs are constants in code — no `appsettings.json` entries:
-
-| Setting | Where | Default |
-|---|---|---|
-| Global permit limit (req/window) | `Program.cs` → `o.PermitLimit` | `50` |
-| Global window | `Program.cs` → `o.Window` | `1 s` |
-| Per-user turn cap | `Throttling/UserTurnLimiter.cs` → `MaxTurnsPerWindow` | `100` |
-| Per-user window | `Throttling/UserTurnLimiter.cs` → `WindowHours` | `24` |
+See [step-by-step-tutorial.md → Throttling — operational notes](step-by-step-tutorial.md#throttling--operational-notes) for caveats and tuning knobs.
 
 ## Project layout
 
@@ -119,17 +106,22 @@ All knobs are constants in code — no `appsettings.json` entries:
 W365A-Playground-Agent/
 ├── README.md                          ← you are here
 ├── step-by-step-tutorial.md           ← step-by-step setup, deploy, troubleshoot
+├── LICENSE                            ← MIT (sample code)
 ├── W365APlaygroundAgent.sln
 ├── .gitignore                         ← C#-specific ignore rules
 └── src/
     ├── W365APlaygroundAgent.csproj
     ├── Program.cs                     ← DI + endpoint mapping
     ├── Agent/PlaygroundAgent.cs       ← agent logic
+    ├── Auth/                          ← JWT validation
     ├── ComputerUse/                   ← Responses API + screenshot forwarding
     ├── LocalTools/                    ← local tools (weather, datetime)
     ├── Throttling/                    ← per-user turn quota + global HTTP rate limit
     ├── Telemetry/                     ← OpenTelemetry + A365 observability
+    ├── Properties/launchSettings.json ← <<PLACEHOLDER>> values (force-tracked)
     ├── appsettings.json               ← <<PLACEHOLDER>> values
+    ├── a365.config.min.json           ← a365 CLI config template (minimal)
+    ├── a365.config.full.json          ← a365 CLI config template (all fields)
     ├── ToolingManifest.json           ← MCP server declarations
     └── appPackage/manifest.json       ← Teams app manifest
 ```
@@ -145,5 +137,6 @@ W365A-Playground-Agent/
 
 ## Contributing & license
 
-See [CONTRIBUTING.md](../CONTRIBUTING.md), [CODE_OF_CONDUCT.md](../CODE_OF_CONDUCT.md),
-and [LICENSE.md](../LICENSE.md) at the repo root.
+See [CONTRIBUTING.md](../CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](../CODE_OF_CONDUCT.md) at the repo root.
+
+Code in this sample folder is licensed under the [MIT License](LICENSE). Documentation across the rest of the repo is under [CC-BY-4.0](../LICENSE.md).
