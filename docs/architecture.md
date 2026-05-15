@@ -97,7 +97,7 @@ Delivers the interactive pixel and device experience to humans.
           │                     Cloud PC (VM)                        │
           │  ┌───────────────────┐    ┌───────────────────────────┐  │
           │  │   Computer-Do     │    │     Computer-See          │  │
-          │  │   (37 MCP Tools)  │    │  (Screen Share / WebRTC)  │  │
+          │  │   (54 MCP Tools)  │    │  (Screen Share / WebRTC)  │  │
           │  │   Desktop, Browser│    │  Start, Stop, TakeControl │  │
           │  │   Accessibility   │    │  ReleaseControl           │  │
           │  └───────────────────┘    └───────────────────────────┘  │

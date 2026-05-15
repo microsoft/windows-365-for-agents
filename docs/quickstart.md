@@ -44,8 +44,8 @@ CLIENT_ID     = "your-app-client-id"
 CLIENT_SECRET = "your-app-secret"
 POOL_ID       = "your-pool-id"
 USER_OID      = "your-aad-user-object-id"
-REGION        = "eastus2"
-SESSION_BASE  = f"https://{REGION}.sessionmanagement.regional.cloudinferenceplatform.azure.net"
+REGION        = "canadacentral"  # Test regions: canadacentral, eastus2
+SESSION_BASE  = f"https://{REGION}.sessionmanagement.regional.cloudinferenceplatform.azure-test.net"
 
 # --- 1. Acquire token ---
 token_resp = httpx.post(
@@ -53,7 +53,7 @@ token_resp = httpx.post(
     data={
         "client_id": CLIENT_ID,
         "client_secret": CLIENT_SECRET,
-        "scope": "api://W365Agents-Prod/.default",
+        "scope": "api://W365Agents-Int/.default",  # Test and Int share the same audience
         "grant_type": "client_credentials",
     },
 )
@@ -173,6 +173,6 @@ httpx.delete(
 ## Next Steps
 
 - [Architecture Overview](./architecture.md) — understand the four-plane design
-- [MCP Tools Reference](./mcp-tools.md) — explore all 37 built-in tools
+- [MCP Tools Reference](./mcp-tools.md) — explore all 54 built-in tools
 - [API Reference](./api-reference.md) — full endpoint documentation
 - [Security](./security.md) — identity and Zero Trust model

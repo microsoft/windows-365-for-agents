@@ -43,6 +43,15 @@ A: No. The endpoint is HTTP POST-only with JSON-RPC payloads. Standard MCP stdio
 **Q: What is the maximum screenshot size?**
 A: Full-screen PNG images are typically 1–3 MB. They must fit within the 4 MB payload limit.
 
+**Q: How do I get a test pool?**
+A: Email wcxcipai@microsoft.com with your app details and requested region. Test regions are `canadacentral` and `eastus2`.
+
+**Q: What are the browser snapshot/ref tools?**
+A: `browser_snapshot` captures the page's accessibility tree with stable ref IDs (e.g., `e5`). You can then use `browser_click_ref`, `browser_type_ref`, and `browser_hover_ref` to interact with elements by ref instead of CSS selectors or coordinates. Refs expire on navigation — retake the snapshot if they become stale.
+
+**Q: How do I manage processes on the device?**
+A: Use `list_processes` to enumerate running processes (returns PIDs and `startTimeTicks`), then `kill_process` with both `pid` and `startTime` to safely terminate. The `startTime` parameter prevents accidentally killing a recycled PID. Use `launch_application` to start GUI apps from allowed directories.
+
 ---
 
 ## Infrastructure

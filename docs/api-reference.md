@@ -6,17 +6,17 @@ Windows 365 for Agents exposes two complementary API surfaces:
 |---------|-------|-----------|---------|
 | **Graph API** | Computer-Create | IT admin / ISV | Shape and maintain the pool |
 | **Graph API** | Computer-Get | Partner application | Reserve / release a Cloud PC |
-| **MCP** | Computer-Do | AI agent | Operate the Cloud PC (37 tools) |
+| **MCP** | Computer-Do | AI agent | Operate the Cloud PC (54 tools) |
 | **MCP** | Computer-See | Partner app (on behalf of human) | Observe and co-drive |
 
 ## Environment URLs
 
-| Environment | Session Base URL | Device Base URL |
-|-------------|-----------------|-----------------|
-| Test | `https://{region}.sessionmanagement.regional.cloudinferenceplatform.azure-test.net` | `https://{poolId}.{region}.remotinginterface.regional.cloudinferenceplatform.azure-test.net` |
-| Int | `https://{region}.sessionmanagement.regional.cloudinferenceplatform.azure-int.net` | `https://{poolId}.{region}.remotinginterface.regional.cloudinferenceplatform.azure-int.net` |
-| PreProd | `https://{region}.sessionmanagement.regional.cloudinferenceplatform.azure-preprod.net` | `https://{poolId}.{region}.remotinginterface.regional.cloudinferenceplatform.azure-preprod.net` |
-| Prod | `https://{region}.sessionmanagement.regional.cloudinferenceplatform.azure.net` | `https://{poolId}.{region}.remotinginterface.regional.cloudinferenceplatform.azure.net` |
+| Environment | Regions | Session Base URL | Device Base URL |
+|-------------|---------|-----------------|-----------------|
+| Test | canadacentral, eastus2 | `https://{region}.sessionmanagement.regional.cloudinferenceplatform.azure-test.net` | `https://{poolId}.{region}.remotinginterface.regional.cloudinferenceplatform.azure-test.net` |
+| Int | westus2, northeurope | `https://{region}.sessionmanagement.regional.cloudinferenceplatform.azure-int.net` | `https://{poolId}.{region}.remotinginterface.regional.cloudinferenceplatform.azure-int.net` |
+| PreProd | Contact W365A team | `https://{region}.sessionmanagement.regional.cloudinferenceplatform.azure-preprod.net` | `https://{poolId}.{region}.remotinginterface.regional.cloudinferenceplatform.azure-preprod.net` |
+| Prod | Contact W365A team | `https://{region}.sessionmanagement.regional.cloudinferenceplatform.azure.net` | `https://{poolId}.{region}.remotinginterface.regional.cloudinferenceplatform.azure.net` |
 
 ## API Summary
 
@@ -80,8 +80,8 @@ Session kind is determined by request headers at checkout time:
 
 | Kind | Headers Required | Description |
 |------|-----------------|-------------|
-| **HumanUser** (default) | `user-object-id: {AAD user OID}` | Standard interactive user session |
-| **Agentic** | `x-ms-authorization-auxiliary: {agent token}`, `user-object-id: {agent user ID}` | Agent-driven session |
+| **HumanUser** (default) | `user-object-id: {AAD user OID}` | Standard interactive user session bound to an AAD identity |
+| **Agentic** | `x-ms-authorization-auxiliary: {agent identity token}`, `user-object-id: {agent user ID}` | Agent-driven session. The auxiliary token is an agent identity token issued by the Identity RM service provisioned in your tenant. This token identifies the specific agent (e.g., "Sales Agent") requesting access. Contact wcxcipai@microsoft.com for tenant setup and token provisioning. |
 | **Local** | Neither header | System-account session with no AAD user binding |
 
 > Idle sessions are evicted after **30 minutes of inactivity**. Always checkin sessions explicitly when done.
@@ -195,6 +195,6 @@ See full documentation: [Screen Sharing](./screen-sharing.md)
 
 ## Next Steps
 
-- [MCP Tools Reference](./mcp-tools.md) — all 37 built-in tools
+- [MCP Tools Reference](./mcp-tools.md) — all 54 built-in tools
 - [Screen Sharing](./screen-sharing.md) — human-in-the-loop controls
 - [Quick Start](./quickstart.md) — end-to-end Python example

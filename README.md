@@ -31,7 +31,7 @@ Built on the [Windows 365](https://learn.microsoft.com/en-us/windows-365/overvie
 
 - 🖥️ **Secure Cloud PCs** — Entra ID-joined, Intune-managed, governed by enterprise security policies
 - 🔄 **Check-in / Check-out model** — Agents reserve a Cloud PC per task and return it when done
-- 🤖 **37 MCP tools** — Desktop automation, browser control, accessibility, shell commands
+- 🤖 **54 MCP tools** — Desktop automation, browser control, accessibility, shell commands
 - 👁️ **Real-time screen sharing** — Human-in-the-loop observation and takeover via WebRTC
 - 🏢 **Enterprise-grade** — Conditional Access, compliance, audit trails built in
 - ⚡ **Pool-based scaling** — Provision pools of Cloud PCs; agents request capability, not specific machines
@@ -47,7 +47,7 @@ Built on the [Windows 365](https://learn.microsoft.com/en-us/windows-365/overvie
 | [Cloud PC Pools](./docs/cloud-pc-pools.md) | Pool concepts, status, management |
 | [Provisioning](./docs/provisioning.md) | Create and manage provisioning policies in Intune |
 | [API Reference](./docs/api-reference.md) | Session checkout/checkin, MCP, screen sharing endpoints |
-| [MCP Tools](./docs/mcp-tools.md) | All 37 built-in tools: desktop, browser, accessibility |
+| [MCP Tools](./docs/mcp-tools.md) | All 54 built-in tools: desktop, browser, accessibility |
 | [Screen Sharing](./docs/screen-sharing.md) | Human-in-the-loop observation and shared control |
 | [Security](./docs/security.md) | Identity, Entra integration, Zero Trust, authentication |
 | [FAQ](./docs/faq.md) | Common questions and troubleshooting |
@@ -75,7 +75,7 @@ Built on the [Windows 365](https://learn.microsoft.com/en-us/windows-365/overvie
 │  │  ┌────────────┐ ┌─────────┐  │                           │
 │  │  │Computer-Do │ │Computer-│  │                           │
 │  │  │ (MCP Tools)│ │  See    │  │                           │
-│  │  │ 37 tools   │ │(Screen  │  │                           │
+│  │  │ 54 tools   │ │(Screen  │  │                           │
 │  │  │ Desktop,   │ │ Share)  │  │                           │
 │  │  │ Browser,   │ │ WebRTC  │  │                           │
 │  │  │ A11y       │ │         │  │                           │
@@ -99,8 +99,8 @@ CLIENT_ID     = "your-app-client-id"
 CLIENT_SECRET = "your-app-secret"
 POOL_ID       = "your-pool-id"
 USER_OID      = "your-aad-user-object-id"
-REGION        = "eastus2"
-SESSION_BASE  = f"https://{REGION}.sessionmanagement.regional.cloudinferenceplatform.azure.net"
+REGION        = "canadacentral"  # Test regions: canadacentral, eastus2
+SESSION_BASE  = f"https://{REGION}.sessionmanagement.regional.cloudinferenceplatform.azure-test.net"
 
 # 1. Acquire token
 token_resp = httpx.post(
@@ -108,7 +108,7 @@ token_resp = httpx.post(
     data={
         "client_id": CLIENT_ID,
         "client_secret": CLIENT_SECRET,
-        "scope": "api://W365Agents-Prod/.default",
+        "scope": "api://W365Agents-Int/.default",  # Test/Int audience
         "grant_type": "client_credentials",
     },
 )
