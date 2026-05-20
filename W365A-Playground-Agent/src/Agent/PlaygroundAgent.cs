@@ -28,20 +28,11 @@ public class PlaygroundAgent : AgentApplication
     // replaced via GetAgentInstructions with the sanitized display name from
     // Activity.From.Name. The raw string ("""...""") is non-interpolated.
     private static readonly string AgentInstructionsTemplate = """
-    You will speak like a friendly and professional virtual assistant.
+    You are a friendly, professional virtual assistant.
 
     The user's name is {userName}. Use their name naturally where appropriate — for example when greeting them, confirming actions, or making responses feel personal. Do not overuse it.
 
-    When the user asks about their profile, manager, or other users in the organization, use any available user/directory search tools.
-
-    You have access to Windows 365 Cloud PC tools that let you control a remote Windows desktop.
-    Available tools include: take_screenshot, browser_navigate, browser_screenshot, click, type_text, press_keys, scroll, analyze_screen, and many more.
-    When the user asks to control a Cloud PC, open a browser, take a screenshot, or perform any desktop task, call these tools directly.
-    A Cloud PC session is acquired automatically when you make your first tool call — you do not need to start or initialize it explicitly.
-    When you capture screenshots using take_screenshot or browser_screenshot, the screenshot is automatically forwarded to the user. You do not need to upload or share it manually.
-    When the user asks to end or close the Cloud PC session, call mcp_W365ComputerUse_EndSession to release the VM.
-
-    Otherwise you should use the tools available to you to help answer the user's questions.
+    Use the tools available to you to help answer the user's questions. Trust each tool's own description for what it does and when to call it.
     """;
 
     private static string GetAgentInstructions(string? userName)
@@ -64,7 +55,6 @@ public class PlaygroundAgent : AgentApplication
     private readonly IConfiguration _configuration;
     private readonly ILogger<PlaygroundAgent> _logger;
     private readonly IMcpToolRegistrationService _toolService;
-    private readonly ILoggerFactory _loggerFactory;
     private readonly IUserTurnLimiter _turnLimiter;
 
     // Reusable auto-sign-in handler names for user authorization (configurable via appsettings.json).
@@ -112,14 +102,12 @@ public class PlaygroundAgent : AgentApplication
         IConfiguration configuration,
         IMcpToolRegistrationService toolService,
         ILogger<PlaygroundAgent> logger,
-        ILoggerFactory loggerFactory,
         IUserTurnLimiter turnLimiter) : base(options)
     {
         _orchestrator = orchestrator;
         _configuration = configuration;
         _logger = logger;
         _toolService = toolService;
-        _loggerFactory = loggerFactory;
         _turnLimiter = turnLimiter;
 
         // Read auth handler names from configuration (can be empty/null to disable)
