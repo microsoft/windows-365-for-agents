@@ -30,7 +30,7 @@ By following this sample end-to-end, you will:
 
 | Goal | What you need |
 |---|---|
-| Compile and run locally (no Cloud PC) | .NET 8 SDK, Azure OpenAI resource, OpenWeather API key |
+| Compile and run locally (no Cloud PC) | .NET 8 SDK, Azure OpenAI resource |
 | Full A365 production deployment | + Azure subscription, [`a365` CLI](https://learn.microsoft.com/en-us/microsoft-agent-365/developer/agent-365-cli), Entra tenant admin (or Agent ID Developer role) |
 | Full Cloud PC computer use | + [Agent 365 Frontier Program](https://adoption.microsoft.com/copilot/frontier-program/) enrollment + provisioned [Windows 365 Cloud PC agent pool](../docs/cloud-pc-pools.md) |
 
@@ -48,14 +48,13 @@ cd src
 # Non-secret config (Endpoint, DeploymentName, ApiVersion, TokenValidation:Enabled) is set in
 # src/appsettings.json (placeholders) and src/Properties/launchSettings.json (env vars).
 dotnet user-secrets set "AIServices:AzureOpenAI:ApiKey" "<your-api-key>"
-dotnet user-secrets set "OpenWeatherApiKey"             "<your-openweather-key>"
 
 # Before running: open src/appsettings.json. The <<…>> placeholders fall into 3 buckets:
 #   - <<agentBlueprintId>>, <<tenantId>>, <<Connections__ServiceConnection__Settings__ClientSecret>>
 #     → automatically stamped by 'a365 setup all'.
 #     Never commit the real ClientSecret; restore the <<…>> placeholder before 'git commit'.
-#   - <<AIServices__AzureOpenAI__ApiKey>> and <<openweatherApiKey>>
-#     → resolved from the user-secrets you just set. Leave as <<…>>.
+#   - <<AIServices__AzureOpenAI__ApiKey>>
+#     → resolved from the user-secret you just set. Leave as <<…>>.
 # Additionally: AIServices:AzureOpenAI ships with Microsoft demo DeploymentName/Endpoint/
 # ApiVersion. If you have your own Azure OpenAI resource, replace those three.
 
@@ -72,7 +71,7 @@ The agent listens on `http://localhost:3978/api/messages`.
 | Hosting | `Microsoft.Agents.Hosting.AspNetCore` | Bot Framework adapter, Teams channel |
 | Agent | `PlaygroundAgent : AgentApplication` (`src/Agent/PlaygroundAgent.cs`) | Turn handlers, install/uninstall, welcome message |
 | LLM loop | `ResponsesOrchestrator` (`src/ComputerUse/`) | OpenAI Responses API, tool-call dispatch, screenshot forwarding |
-| Tools | `src/LocalTools/` + `ToolingManifest.json` | Local tools (weather, datetime) + MCP servers (`mcp_W365ComputerUse`, etc.) |
+| Tools | `ToolingManifest.json` | MCP servers (`mcp_W365ComputerUse`, etc.) |
 | Throttling | `src/Throttling/` | Per-user turn quota (100 / 24h) + global HTTP rate limit (5 / min) on `/api/messages` |
 | Platform | `Microsoft.Agents.A365.*` | Agent blueprint, MCP tooling, observability |
 
@@ -115,7 +114,6 @@ W365A-Playground-Agent/
     ├── Agent/PlaygroundAgent.cs       ← agent logic
     ├── Auth/                          ← JWT validation
     ├── ComputerUse/                   ← Responses API + screenshot forwarding
-    ├── LocalTools/                    ← local tools (weather, datetime)
     ├── Throttling/                    ← per-user turn quota + global HTTP rate limit
     ├── Telemetry/                     ← OpenTelemetry + A365 observability
     ├── Properties/launchSettings.json ← <<PLACEHOLDER>> values (force-tracked)
