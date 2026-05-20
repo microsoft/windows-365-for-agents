@@ -371,8 +371,10 @@ public sealed class ResponsesOrchestrator
         {
             // Check if this object is an image content item {"type":"image","data":"..."}
             if (el.TryGetProperty("type", out var t) &&
+                t.ValueKind == JsonValueKind.String &&
                 t.GetString()?.Equals("image", StringComparison.OrdinalIgnoreCase) == true &&
-                el.TryGetProperty("data", out var d))
+                el.TryGetProperty("data", out var d) &&
+                d.ValueKind == JsonValueKind.String)
                 return d.GetString();
 
             // Otherwise recurse into all property values (handles {"content":[...]} wrapper)

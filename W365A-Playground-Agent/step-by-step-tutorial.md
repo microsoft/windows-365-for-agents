@@ -13,7 +13,6 @@ Step-by-step guide to set up, run, and deploy the Windows 365 for Agents Playgro
 - [.NET 8.0 SDK](https://dotnet.microsoft.com/download)
 - Azure subscription (for both Azure OpenAI and the production App Service deployment)
 - Azure OpenAI resource (endpoint, API key, deployment name, API version)
-- OpenWeather API key — free account at https://openweathermap.org/price
 - For Cloud PC Computer Use: [Agent 365 Frontier Program enrollment](https://adoption.microsoft.com/copilot/frontier-program/) and a Windows 365 Cloud PC agent pool. Approval can take several days; you can proceed with steps 1–4 (everything except the actual Cloud PC interaction) while you wait.
 - See [windows-365-for-agents/docs](../docs/) for platform setup, provisioning policies, and session lifecycle
 
@@ -41,9 +40,6 @@ W365A-Playground-Agent/
     │   └── PlaygroundAgent.cs       ← main agent logic
     ├── Auth/
     │   └── TokenValidationExtensions.cs  ← JWT validation
-    ├── LocalTools/
-    │   ├── WeatherTool.cs           ← OpenWeather API integration
-    │   └── DateTimeTool.cs          ← local datetime utility
     ├── ComputerUse/
     │   └── ResponsesOrchestrator.cs ← Responses API agentic loop with screenshot forwarding
     ├── Throttling/
@@ -69,7 +65,6 @@ This gets the agent process running locally so you can debug startup, MCP tool l
 cd src
 
 dotnet user-secrets set "AIServices:AzureOpenAI:ApiKey" "<your-api-key>"
-dotnet user-secrets set "OpenWeatherApiKey"             "<your-openweather-key>"
 ```
 
 > User secrets ID: `7a8f9d79-5c4c-495f-8d56-1db8168ef8bd` (set in the `.csproj`)
@@ -84,7 +79,6 @@ dotnet user-secrets set "OpenWeatherApiKey"             "<your-openweather-key>"
 > | `<<tenantId>>` (2 occurrences: `TokenValidation.TenantId`, `Connections:ServiceConnection:Settings:AuthorityEndpoint`) | **`a365 setup all`** |
 > | `<<Connections__ServiceConnection__Settings__ClientSecret>>` | **`a365 setup all`** |
 > | `<<AIServices__AzureOpenAI__ApiKey>>` | User secrets you set above — leave as `<<…>>` |
-> | `<<openweatherApiKey>>` | User secrets you set above — leave as `<<…>>` |
 >
 > The `AIServices:AzureOpenAI` block (`DeploymentName`, `Endpoint`, `ApiVersion`) ships with Microsoft demo values — if you bring your own Azure OpenAI resource, replace those three with your values.
 >
@@ -117,7 +111,7 @@ matching `"BEARER_TOKEN_MCP_<UPPERCASE_NAME>"` entry before re-running the comma
 
 ### 3. Run
 
-This first run boots the agent for build verification, local-tool exercise (weather, datetime), and turn-handler debugging. **Real MCP tools won't work yet** — populating the `BEARER_TOKEN_*` placeholders in `launchSettings.json` requires the blueprint and permissions you'll provision in Production Setup. Add `"SKIP_TOOLING_ON_ERRORS": "true"` to the `DevelopmentMode` profile's `environmentVariables` so MCP-load failures don't crash startup:
+This first run boots the agent for build verification and turn-handler debugging. **Real MCP tools won't work yet** — populating the `BEARER_TOKEN_*` placeholders in `launchSettings.json` requires the blueprint and permissions you'll provision in Production Setup. Add `"SKIP_TOOLING_ON_ERRORS": "true"` to the `DevelopmentMode` profile's `environmentVariables` so MCP-load failures don't crash startup:
 
 ```json
 "environmentVariables": {
@@ -256,7 +250,7 @@ a365 setup permissions bot   # grants Messaging Bot API permissions (must run AF
 By this point most of `src/appsettings.json` is already populated:
 
 - **Stamped by `a365 setup all`:** `<<agentBlueprintId>>` (3 occurrences), `<<tenantId>>` (2 occurrences), and `<<Connections__ServiceConnection__Settings__ClientSecret>>`.
-- **Resolved from your user-secrets at runtime:** `<<AIServices__AzureOpenAI__ApiKey>>` and `<<openweatherApiKey>>`. Leave these as `<<...>>` literals in the file.
+- **Resolved from your user-secrets at runtime:** `<<AIServices__AzureOpenAI__ApiKey>>`. Leave this as `<<...>>` literal in the file.
 - **Microsoft-provided demo values:** `AIServices:AzureOpenAI:DeploymentName` / `Endpoint` / `ApiVersion`. Replace these three if you bring your own Azure OpenAI resource.
 
 **For production deployment**, set `TokenValidation:Enabled` to `true` so the agent validates incoming JWTs (it ships as `false` for local dev convenience).
@@ -353,7 +347,6 @@ az webapp config appsettings set `
     "AIServices__AzureOpenAI__ApiKey=..." `
     "AIServices__AzureOpenAI__DeploymentName=..." `
     "AIServices__AzureOpenAI__ApiVersion=..." `
-    "OpenWeatherApiKey=..." `
     "Connections__ServiceConnection__Settings__ClientSecret=..."
 ```
 
@@ -414,7 +407,6 @@ Full walkthrough with screenshots: [Create an agent instance](https://learn.micr
 | Goal | File | What to modify |
 |---|---|---|
 | Change system prompt / personality | `Agent/PlaygroundAgent.cs` | `AgentInstructionsTemplate` const |
-| Add a local tool | `LocalTools/` | New class, register in `PlaygroundAgent.cs` with `AIFunctionFactory.Create()` |
 | Add an MCP server | `ToolingManifest.json` | `a365 develop add-mcp-servers <name>` |
 | Change welcome message | `Agent/PlaygroundAgent.cs` | `AgentWelcomeMessage` const |
 | Change LLM model/endpoint | `appsettings.json` | `AIServices:AzureOpenAI` section |
@@ -476,9 +468,6 @@ The defaults below are intentionally conservative for a demo agent. To raise eit
 
 **`SKIP_TOOLING_ON_ERRORS` is true but agent still crashes on startup**
 → Check Azure OpenAI credentials — those are validated at startup in `Program.cs`.
-
-**OpenWeather tool always returns null**
-→ `OpenWeatherApiKey` is missing or invalid. Set via user secrets and restart.
 
 **`a365 setup all` fails on permissions step**
 → You are not a Global Administrator. Run `a365 setup all` without the permissions step, then share the config dir with a GA for `a365 setup admin`.

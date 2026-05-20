@@ -33,9 +33,6 @@
 		<PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.15.1" />
 		<PackageReference Include="OpenTelemetry.Instrumentation.Runtime" Version="1.15.1" />
 
-		<!-- Additional Packages -->
-		<PackageReference Include="OpenWeatherMapSharp" Version="4.2.0" />
-
 	</ItemGroup>
 
 </Project>
