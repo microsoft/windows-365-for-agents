@@ -1,10 +1,10 @@
 # MCP Tool Reference
 
-Windows 365 for Agents ships **54 built-in tools**, invoked via `tools/call` over the [MCP endpoint](./api-reference.md#mcp-model-context-protocol). Coordinates use screen pixels with `(0, 0)` at top-left. Discover tools at runtime via `tools/list`.
+Windows 365 for Agents ships **62 built-in tools**, invoked via `tools/call` over the [MCP endpoint](./api-reference.md#mcp-model-context-protocol). Coordinates use screen pixels with `(0, 0)` at top-left. Discover tools at runtime via `tools/list`.
 
 ---
 
-## Desktop Tools (25)
+## Desktop Tools (26)
 
 ### `move_mouse`
 
@@ -115,15 +115,7 @@ Bring window to foreground by fuzzy title match.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `titlePattern` | string | Yes | — | Partial title (case-insensitive substring) |
-
-### `focus_browser`
-
-Focus a browser window (Edge, Chrome, Firefox).
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `pattern` | string | No | null | URL or title substring (omit for any browser) |
+| `title` | string | Yes | — | Partial title (case-insensitive substring) |
 
 ### `close_window`
 
@@ -131,7 +123,7 @@ Graceful close. Protected system processes cannot be closed.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `titlePattern` | string | Yes | — | Partial title (80% match threshold) |
+| `title` | string | Yes | — | Partial title (80% match threshold) |
 
 **Returns:** JSON `{matchedTitle, processName, closed}`.
 
@@ -156,33 +148,29 @@ No parameters. **Returns:** JSON `{width, height}`.
 
 ### `execute_shell_command`
 
-Run a whitelisted shell command.
-
-**Allowed commands:** `git`, `npm`, `dotnet`, `python`, `cargo`, `node`, `pip`, `dir`, `mkdir`, `del`, `copy`, `move`, `robocopy`, `findstr`, `where`, `type`, `notepad`.
+Run a shell command with piping (`|`) and chaining (`&&`, `||`, `&`). Default timeout 30s, max 120s.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `command` | string | Yes | — | Command to execute |
 | `cwd` | string | No | null | Working directory. Use forward slashes (`C:/Users/me/project`). |
-| `timeoutMs` | int | No | 30000 | Timeout in ms (max 30000) |
+| `timeoutMs` | int | No | 30000 | Timeout in ms (max 120000) |
 
-**Returns:** JSON `{stdout, stderr, exitCode, success, timedOut, resourceLimitsApplied}`.
+**Returns:** JSON `{stdout, stderr, exitCode, success, timedOut}`.
 
 > stdout/stderr truncated at 32 KB.
 
-**Blocked patterns:** Shell metacharacters (`` \`;&<> ``), `%VAR%` expansion, interpreter eval (`python -c`, `node -e`), `git config --global`, `npm -g`, path-prefixed executables, `rm -rf`, `sudo`, disk/system commands. Use `execute_python_code` for arbitrary computation.
-
 ### `execute_python_code`
 
-Execute Python code in a sandboxed process (512 MB memory, 30s timeout, 262,144 char limit).
+Execute Python code in a sandboxed process (512 MB memory, max 120s, 262,144 char limit).
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `code` | string | Yes | — | Python code (max 262,144 chars) |
 | `cwd` | string | No | null | Working directory. Use forward slashes. |
-| `timeoutMs` | int | No | 30000 | Timeout in ms (max 30000) |
+| `timeoutMs` | int | No | 30000 | Timeout in ms (max 120000) |
 
-**Returns:** Same schema as `execute_shell_command`.
+**Returns:** JSON `{stdout, stderr, exitCode}`.
 
 ### `wait_milliseconds`
 
@@ -247,17 +235,44 @@ Return OS version, CPU, RAM, disk space, and display resolution.
 
 No parameters. **Returns:** JSON with system information.
 
+### `find_ui_element`
+
+Find elements by text, role, or name (case-insensitive substring). At least one search parameter required.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `text` | string | No | null | Text to search |
+| `role` | string | No | null | UI role: `Button`, `TextBox`, `CheckBox`, `MenuItem`, etc. |
+| `name` | string | No | null | Accessible name (takes precedence over `text`) |
+| `windowHandle` | long | No | null | Window handle (`null` = foreground) |
+
+**Returns:** JSON array of matching elements with `role`, `name`, `value`, `x`, `y`, `width`, `height`.
+
+### `get_accessibility_tree`
+
+Get UI element tree for the foreground window.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `maxDepth` | int | No | 3 | Max tree depth (1–10) |
+| `maxElements` | int | No | 500 | Max elements (1–2000) |
+
+**Returns:** JSON tree `{role, name, value, x, y, width, height, children[...]}`.
+
 ---
 
-## Browser Tools (27)
+## Browser Tools (36)
 
 > The browser is **Microsoft Edge**. It launches automatically on the first browser tool call.
 
 ### `browser_navigate`
 
+Navigate to a URL and wait for the page to load.
+
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `url` | string | Yes | — | Full URL including protocol |
+| `waitUntil` | string | No | `"load"` | Wait condition: `load`, `networkidle0`, `networkidle2` |
 
 **Returns:** Text confirmation.
 
@@ -283,35 +298,47 @@ No parameters. **Returns:** Full page HTML source (truncated at 512 KB).
 
 ### `browser_click`
 
+Click a DOM element by CSS selector. More reliable than coordinate-based `click` for browser content.
+
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `selector` | string | Yes | — | CSS selector (e.g. `#submit-btn`) |
+| `button` | string | No | `"Left"` | `Left`, `Right`, `Middle`, `Backward`, `Forward` |
+| `clickCount` | int | No | 1 | 1=single, 2=double, 3=triple |
 
-More reliable than coordinate-based `click` for browser content. **Returns:** Text confirmation.
+**Returns:** Text confirmation.
 
 ### `browser_type`
+
+Type text into a DOM element by CSS selector. Clears existing text by default.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `selector` | string | Yes | — | CSS selector of input element |
 | `text` | string | Yes | — | Text to type |
+| `clear` | bool | No | true | Clear existing text before typing |
 
 **Returns:** Text confirmation.
 
 ### `browser_query_text`
 
+Return `innerText` of the first element matching a CSS selector.
+
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `selector` | string | Yes | — | CSS selector |
+| `query` | string | Yes | — | CSS selector (e.g. `h1`, `#content`, `.message`) |
 
-**Returns:** Text content of first matching element.
+**Returns:** `innerText` of first matching element, empty if no match.
 
 ### `browser_wait_for`
+
+Wait for a DOM element matching CSS selector to appear (default 5s, max 30s).
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `selector` | string | Yes | — | CSS selector to wait for |
 | `timeoutMs` | int | No | 5000 | Timeout in ms (max 30000) |
+| `visible` | bool | No | false | Wait for element to be visible, not just in DOM |
 
 **Returns:** Text confirmation that element appeared, or error on timeout.
 
@@ -325,23 +352,36 @@ More reliable than coordinate-based `click` for browser content. **Returns:** Te
 
 ### `browser_list_tabs`
 
-No parameters. **Returns:** JSON array `[{index, title, url}]`.
+No parameters. **Returns:** JSON array `[{tabId, title, url}]`.
 
 ### `browser_switch_tab` / `browser_close_tab`
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `tabIndex` | int | Yes | — | 0-based tab index |
+| `tabId` | string | Yes | — | Tab ID from `browser_list_tabs` |
 
-**Returns:** Text confirmation.
+**Returns:** Text confirmation. `browser_close_tab` fails if it is the last remaining tab.
 
 ### `browser_new_tab`
+
+Open a new tab, optionally navigating to a URL.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `url` | string | No | null | URL to open (blank if omitted) |
 
-**Returns:** JSON `{index, title, url}`.
+**Returns:** Text confirmation.
+
+### `browser_create_tabs`
+
+Open multiple tabs at once.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `urls` | string[] | Yes | — | URLs to open, one per tab |
+| `foregroundIndex` | int | No | null | Index of tab to bring to foreground after creation |
+
+**Returns:** Text confirmation.
 
 ### `browser_screenshot`
 
@@ -402,12 +442,13 @@ Accept or dismiss a pending browser dialog (alert, confirm, prompt, beforeunload
 
 ### `browser_snapshot`
 
-Capture accessibility tree with ref IDs (e.g. `e5`) that map to DOM nodes. Use refs with `browser_click_ref`, `browser_type_ref`, `browser_hover_ref`. Refs expire on navigation.
+Capture accessibility tree with ref IDs (e.g. `e5`) that map to DOM nodes. Use refs with `browser_click_ref`, `browser_type_ref`, `browser_hover_ref`, `browser_keypress_ref`, `browser_scroll_ref`, `browser_set_file_input_ref`. Refs expire on navigation.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `maxDepth` | int | No | 5 | Maximum tree depth 1–10 |
 | `includeIframes` | bool | No | true | Include cross-origin iframes |
+| `redactValues` | bool | No | true | Redact values in text inputs |
 
 **Returns:** JSON with accessibility snapshot and ref IDs.
 
@@ -448,33 +489,93 @@ Hover over element by ref ID from `browser_snapshot`. Returns immediately. Fails
 
 **Returns:** Text confirmation with coordinates.
 
----
+### `browser_keypress_ref`
 
-## Accessibility Tools (2)
-
-### `get_accessibility_tree`
-
-Get UI element tree for the foreground window.
+Press a single key on element by ref. Focuses element first. Supports modifiers.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `maxDepth` | int | No | 3 | Max tree depth (1–10) |
-| `maxElements` | int | No | 500 | Max elements (1–2000) |
+| `snapshotId` | string | Yes | — | Snapshot ID from `browser_snapshot` |
+| `ref` | string | Yes | — | Element ref (e.g. `e5`) |
+| `key` | string | Yes | — | Key name: `Enter`, `Escape`, `Tab`, `ArrowUp`/`Down`, `F1`–`F12`, etc. |
+| `modifiers` | string[] | No | null | Modifier keys: `Ctrl`, `Shift`, `Alt`, `Meta` |
 
-**Returns:** JSON tree `{role, name, value, x, y, width, height, children[...]}`.
+**Returns:** Text confirmation.
 
-### `find_ui_element`
+### `browser_scroll_ref`
 
-Find elements by text, role, or name (case-insensitive substring). At least one search parameter required.
+Scroll element into view by ref, optionally scroll by delta within element.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `text` | string | No | null | Text to search |
-| `role` | string | No | null | UI role: `Button`, `TextBox`, `CheckBox`, `MenuItem`, etc. |
-| `name` | string | No | null | Accessible name (takes precedence over `text`) |
-| `windowHandle` | long | No | null | Window handle (`null` = foreground) |
+| `snapshotId` | string | Yes | — | Snapshot ID from `browser_snapshot` |
+| `ref` | string | Yes | — | Element ref (e.g. `e5`) |
+| `deltaX` | int | No | 0 | Horizontal scroll delta in pixels |
+| `deltaY` | int | No | 0 | Vertical scroll delta in pixels |
 
-**Returns:** JSON array of matching elements with `role`, `name`, `value`, `x`, `y`, `width`, `height`.
+**Returns:** Text confirmation.
+
+### `browser_set_file_input_ref`
+
+Set files on a file input element by ref. Files must exist in Documents, Downloads, Desktop, or TEMP.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `snapshotId` | string | Yes | — | Snapshot ID from `browser_snapshot` |
+| `ref` | string | Yes | — | Element ref for the file input |
+| `filePaths` | string[] | Yes | — | File paths to upload |
+
+**Returns:** Text confirmation.
+
+### `browser_get_page_state`
+
+Get multiple page state fields in one call.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `fields` | string[] | Yes | — | Fields to return: `url`, `title`, `dom`, `screenshot`, `tabs` |
+
+**Returns:** Object with requested fields.
+
+### `browser_get_cookies`
+
+Get cookies for current page or specified URLs. Values are always redacted for security.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `urls` | string[] | No | null | URLs to get cookies for (omit for current page) |
+
+**Returns:** Array of cookie objects with redacted values.
+
+### `browser_set_cookies`
+
+Set cookies on the current page's domain. Adds/overwrites — does not clear existing cookies.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `cookies` | object[] | Yes | — | Array of cookie objects: `{name(req), value(req), domain, path, secure, httpOnly, sameSite}` |
+
+**Returns:** Text confirmation.
+
+### `browser_execute_batch`
+
+Execute multiple browser actions sequentially. Stops on first failure.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `actions` | object[] | Yes | — | Array of `{action, params}`. Allowed: `navigate`, `snapshot`, `click_ref`, `type_ref`, `hover_ref`, `scroll_ref`, `keypress_ref`, `wait_for`, `eval_js`. |
+
+**Returns:** Array of results per action.
+
+### `focus_browser`
+
+Focus a browser window (Edge, Chrome, Firefox). Optionally filter by URL or title substring.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `pattern` | string | No | null | URL or title substring (omit to focus any browser) |
+
+**Returns:** Text confirmation.
 
 ---
 
@@ -482,9 +583,8 @@ Find elements by text, role, or name (case-insensitive substring). At least one 
 
 | Family | Count | Description |
 |--------|-------|-------------|
-| Desktop Interaction | 25 | Mouse, keyboard, screenshots, windows, shell, clipboard, processes |
-| Browser Automation | 27 | Navigation, DOM interaction, tabs, forms, snapshots, ref-based actions |
-| UI Accessibility | 2 | Accessibility tree inspection and element search |
+| Desktop Interaction | 26 | Mouse, keyboard, screenshots, windows, shell, clipboard, processes, accessibility |
+| Browser Automation | 36 | Navigation, DOM interaction, tabs, forms, snapshots, ref-based actions, cookies, batch, PDF |
 
 ## Next Steps
 

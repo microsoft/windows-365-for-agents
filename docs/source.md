@@ -12,7 +12,7 @@
 4. [System Overview](#4-system-overview)
 5. [Quick Start](#5-quick-start)
 6. [API Reference](#6-api-reference)
-7. [MCP Tool Reference (54 tools)](#7-mcp-tool-reference-54-tools)
+7. [MCP Tool Reference (62 tools)](#7-mcp-tool-reference-62-tools)
 8. [FAQ](#8-faq)
 
 ---
@@ -248,7 +248,10 @@ mcp.close()
 httpx.delete(
     f"{SESSION_BASE}/api/sessions/{session_id}",
     params={"api-version": "2.0"},
-    headers={"Authorization": f"Bearer {TOKEN}"},
+    headers={
+        "Authorization": f"Bearer {TOKEN}",
+        "x-ms-sessionId": session_id,  # Required; must match sessionId in path
+    },
 )
 ```
 
@@ -337,6 +340,7 @@ DELETE /api/sessions/{sessionId}?api-version=2.0
 | Header | Required | Description |
 |--------|----------|-------------|
 | `Authorization` | Yes | Bearer token |
+| `x-ms-sessionId` | Yes | Idempotency key. Must be a GUID (UUID v4) and match `sessionId` in path. |
 
 **Response:** `204 No Content`
 
@@ -444,78 +448,11 @@ Non-Start actions return `{"ok": true}` on success or `{"ok": false, "error": "d
 
 ---
 
-## 7. MCP Tool Reference (54 tools)
+## 7. MCP Tool Reference (62 tools)
 
 All tools are invoked via `tools/call`. Coordinates use screen pixels with (0,0) at top-left. Discover tools at runtime via `tools/list`.
 
-### Desktop Tools (25)
-
-#### `move_mouse`
-
-Move cursor to screen position. Use `click` instead if you intend to click.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `x` | int | Yes | — | X in screen pixels |
-| `y` | int | Yes | — | Y in screen pixels |
-
-Returns: Text confirmation.
-
-#### `click`
-
-Click at coordinates, or current cursor position if omitted.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `x` | int | No | null | X in screen pixels, omit for current position |
-| `y` | int | No | null | Y in screen pixels, omit for current position |
-| `button` | string | No | `"Left"` | Left, Right, Middle, Forward, Backward |
-| `clickCount` | int | No | 1 | 1=single, 2=double |
-
-Returns: Text confirmation.
-
-#### `get_cursor_position`
-
-No parameters. Returns: JSON `{cursorX, cursorY}`.
-
-#### `drag_mouse`
-
-Drag from start to end. Also useful for pixel-precise scrolling.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `startX` | int | Yes | — | Start X |
-| `startY` | int | Yes | — | Start Y |
-| `endX` | int | Yes | — | End X |
-| `endY` | int | Yes | — | End Y |
-| `button` | string | No | `"Left"` | Left, Right, Middle |
-
-#### `scroll`
-
-Scroll notches (NOT pixels). 3 notches ~= one page. Positive `deltaY`=down, `deltaX`=right. Clamped to [-20, 20].
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `x` | int | Yes | — | Scroll position X |
-| `y` | int | Yes | — | Scroll position Y |
-| `deltaX` | int | No | 0 | Horizontal notches |
-| `deltaY` | int | No | 0 | Vertical notches |
-
-#### `type_text`
-
-Type text via keyboard simulation. For shortcuts use `press_keys`. For browser form fields prefer `browser_type`.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `text` | string | Yes | — | Text to type |
-
-#### `press_keys`
-
-Press key combination simultaneously. E.g. `["ctrl","c"]`, `["alt","tab"]`.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `keys` | string[] | Yes | — | Key names to press together |
+### Desktop Tools (26)
 
 #### `take_screenshot`
 
@@ -523,16 +460,16 @@ Capture full screen or cropped region as PNG.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `x` | int | No | null | Crop left edge |
-| `y` | int | No | null | Crop top edge |
-| `width` | int | No | null | Crop width |
-| `height` | int | No | null | Crop height |
+| `x` | int \| null | No | null | Crop left edge in screen pixels |
+| `y` | int \| null | No | null | Crop top edge in screen pixels |
+| `width` | int \| null | No | null | Crop width in pixels |
+| `height` | int \| null | No | null | Crop height in pixels |
 
-All four crop params must be provided together or all omitted. Returns: MCP image content block (base64 PNG).
+Returns: PNG image.
 
 #### `zoom_region`
 
-Capture a screen region at native resolution as PNG. Use to inspect small text or dense UI. Max region: 1920x1080.
+Capture a screen region at native resolution as PNG. Max region: 1920x1080.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -541,100 +478,94 @@ Capture a screen region at native resolution as PNG. Use to inspect small text o
 | `width` | int | Yes | — | Width in pixels |
 | `height` | int | Yes | — | Height in pixels |
 
-Returns: MCP image content block (base64 PNG).
+Returns: PNG image.
 
 #### `analyze_screen`
 
-OCR the screen. No parameters. Returns: JSON `{fullText, averageConfidence, boxes[{text, confidence, x, y, width, height}], width, height}`.
-
-#### `list_windows`
-
-No parameters. Returns: JSON array `[{title, processName, handle, x, y, width, height}]`.
-
-#### `activate_window`
-
-Bring window to foreground by fuzzy title match.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `titlePattern` | string | Yes | — | Partial title (case-insensitive substring) |
-
-#### `focus_browser`
-
-Focus a browser window (Edge, Chrome, Firefox).
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `pattern` | string | No | null | URL or title substring (omit for any browser) |
-
-#### `close_window`
-
-Graceful close. Protected system processes cannot be closed.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `titlePattern` | string | Yes | — | Partial title (80% match threshold) |
-
-Returns: JSON `{matchedTitle, processName, closed}`.
-
-#### `resize_window`
-
-Resize, move, maximize, minimize, or restore a window by fuzzy title match.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `title` | string | Yes | — | Window title to match (case-insensitive fuzzy match) |
-| `action` | string | Yes | — | Action: `Resize`, `Move`, `Maximize`, `Minimize`, `Restore` |
-| `x` | int | No | null | Left edge X (for Resize/Move) |
-| `y` | int | No | null | Top edge Y (for Resize/Move) |
-| `width` | int | No | null | Width (for Resize) |
-| `height` | int | No | null | Height (for Resize) |
-
-Returns: Text confirmation.
+OCR the full screen. No parameters. Returns: Object with `text`, confidence scores, and bounding boxes in screen pixels.
 
 #### `get_screen_size`
 
-No parameters. Returns: JSON `{width, height}`.
+No parameters. Returns: `{width, height}` in pixels.
 
-#### `execute_shell_command`
+#### `click`
 
-Run a whitelisted shell command. Allowed commands: `git`, `npm`, `dotnet`, `python`, `cargo`, `node`, `pip`, `dir`, `mkdir`, `del`, `copy`, `move`, `robocopy`, `findstr`, `where`, `type`, `notepad`.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `command` | string | Yes | — | Command to execute |
-| `cwd` | string | No | null | Working directory. Use forward slashes (`C:/Users/me/project`). |
-| `timeoutMs` | int | No | 30000 | Timeout ms (max 30000) |
-
-Returns: JSON `{stdout, stderr, exitCode, success, timedOut, resourceLimitsApplied}`. stdout/stderr truncated at 32 KB.
-
-Blocked patterns: shell metacharacters (`` |;&<>` ``), `%VAR%` expansion, interpreter eval (`python -c`, `node -e`), `git config --global`, `npm -g`, path-prefixed executables, `rm -rf`, `sudo`, disk/system commands. Use `execute_python_code` for arbitrary computation.
-
-#### `execute_python_code`
-
-Execute Python code in a sandboxed process (512 MB memory, 30s timeout, 262,144 char limit).
+Click at screen pixel coordinates (0,0 = top-left). Omit coordinates to click at current cursor position.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `code` | string | Yes | — | Python code (max 262,144 chars) |
-| `cwd` | string | No | null | Working directory. Use forward slashes. |
-| `timeoutMs` | int | No | 30000 | Timeout ms (max 30000) |
+| `x` | int \| null | No | null | X in screen pixels; omit for current position |
+| `y` | int \| null | No | null | Y in screen pixels; omit for current position |
+| `button` | string | No | `"Left"` | Mouse button: Left \| Right \| Middle \| Backward \| Forward |
+| `clickCount` | int | No | 1 | Click count: 1=single, 2=double |
 
-Returns: Same schema as `execute_shell_command`.
+Returns: Text confirmation.
 
-#### `wait_milliseconds`
+#### `move_mouse`
 
-One-shot pause. Do NOT loop — use `browser_wait_for` for polling. Clamped to [0, 5000].
+Move cursor to screen position in pixels.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `ms` | int | Yes | — | Duration ms (max 5000) |
+| `x` | int | Yes | — | X in screen pixels |
+| `y` | int | Yes | — | Y in screen pixels |
+
+Returns: Text confirmation.
+
+#### `drag_mouse`
+
+Drag from start to end position in screen pixels.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `startX` | int | Yes | — | Start X in screen pixels |
+| `startY` | int | Yes | — | Start Y in screen pixels |
+| `endX` | int | Yes | — | End X in screen pixels |
+| `endY` | int | Yes | — | End Y in screen pixels |
+| `button` | string | No | `"Left"` | Mouse button: Left \| Right \| Middle \| Backward \| Forward |
+
+Returns: Text confirmation.
+
+#### `scroll`
+
+Scroll at `(x,y)`. Values are scroll notches, NOT pixels. 3 notches ≈ one page. Clamped to ±20.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `x` | int | Yes | — | X position where to scroll |
+| `y` | int | Yes | — | Y position where to scroll |
+| `scrollX` | int | No | 0 | Horizontal notches (positive=right) |
+| `scrollY` | int | No | 0 | Vertical notches (positive=down) |
+
+Returns: Text confirmation.
+
+#### `type_text`
+
+Type text via keyboard simulation. For browser fields, prefer `browser_type`.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `text` | string | Yes | — | Text to type |
+
+Returns: Text confirmation.
+
+#### `press_keys`
+
+Press key combination simultaneously. Examples: `['ctrl','c']` for copy, `['alt','tab']` for window switch.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `keys` | string[] | Yes | — | Key names to press together, e.g. `['ctrl','a']` |
+
+Returns: Text confirmation.
+
+#### `get_cursor_position`
+
+No parameters. Returns: `{x, y}` in screen pixels.
 
 #### `clipboard_read`
 
-Read system clipboard content. Returns format and payload: text string or base64-encoded image.
-
-No parameters. Returns: JSON with clipboard content (format and payload).
+No parameters. Returns: Format and payload — text string or base64-encoded image.
 
 #### `clipboard_write`
 
@@ -644,64 +575,162 @@ Write text to the system clipboard, replacing current content.
 |-----------|------|----------|---------|-------------|
 | `text` | string | Yes | — | Text to write to clipboard |
 
-Returns: Text confirmation with character count.
+Returns: Text confirmation.
+
+#### `list_windows`
+
+No parameters. Returns: Array of `{title, processName, handle, position}` for all visible windows.
+
+#### `activate_window`
+
+Bring a window to foreground by fuzzy title match (case-insensitive).
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `title` | string | Yes | — | Window title to match (fuzzy) |
+
+Returns: Text confirmation.
+
+#### `close_window`
+
+Close a window by fuzzy title match (sends `WM_CLOSE`). 80% match threshold.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `title` | string | Yes | — | Partial window title (case-insensitive) |
+
+Returns: Matched title, process, and close status.
+
+#### `resize_window`
+
+Resize, move, maximize, minimize, or restore a window by fuzzy title match.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `title` | string | Yes | — | Window title to match (fuzzy) |
+| `action` | string | Yes | — | Action: `Resize` \| `Move` \| `Maximize` \| `Minimize` \| `Restore` |
+| `x` | int \| null | No | null | Left edge X (for Resize/Move) |
+| `y` | int \| null | No | null | Top edge Y (for Resize/Move) |
+| `width` | int \| null | No | null | Width (for Resize) |
+| `height` | int \| null | No | null | Height (for Resize) |
+
+Returns: Text confirmation.
+
+#### `find_ui_element`
+
+Find UI elements by text, role, or name (case-insensitive substring). Returns clickable center coordinates.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `text` | string \| null | No | null | Text to search for |
+| `role` | string \| null | No | null | UI role: Button, TextBox, CheckBox, etc. |
+| `name` | string \| null | No | null | Accessible name (takes precedence over `text`) |
+| `windowHandle` | int \| null | No | null | Window handle (null = foreground) |
+
+Returns: Array of matching elements with coordinates.
+
+#### `get_accessibility_tree`
+
+Get UI element tree for the foreground window.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `maxDepth` | int | No | 3 | Max tree depth (1–10) |
+| `maxElements` | int | No | 500 | Max elements to return (1–2000) |
+
+Returns: Tree of roles, names, bounds in screen pixels.
 
 #### `list_processes`
 
-List running processes (current session only). Returns PID, name, memory, window title, and `startTimeTicks`. Use `startTimeTicks` with `kill_process` to prevent PID recycling.
+List running processes (current session only).
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `maxCount` | int | No | 200 | Maximum number of processes to return |
 
-Returns: JSON array of process info objects.
+Returns: Array of `{pid, name, memory, windowTitle, startTimeTicks}`.
 
 #### `kill_process`
 
-Terminate a process by PID. Requires `startTime` from `list_processes` to prevent killing a recycled PID.
+Terminate a process by PID. Requires `startTime` from `list_processes` to prevent PID recycling.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `pid` | int | Yes | — | Process ID from `list_processes` |
-| `startTime` | long | Yes | — | Process start time ticks from `list_processes` (prevents PID recycling) |
+| `pid` | int | Yes | — | Process ID to terminate |
+| `startTime` | int | Yes | — | Process start time ticks (prevents PID recycling) |
 | `force` | bool | No | false | Force kill without graceful shutdown |
 
-Returns: JSON result.
+Returns: Text confirmation.
 
 #### `launch_application`
 
-Launch a GUI application from allowed directories. Use `execute_shell_command` for CLI commands.
+Launch a GUI application from allowed directories.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `path` | string | Yes | — | Absolute path to the executable. Use forward slashes (`C:/Program Files/app.exe`). |
-| `args` | string[] | No | null | Command-line arguments |
+| `path` | string | Yes | — | Absolute path to executable (use forward slashes) |
+| `args` | string[] \| null | No | null | Command-line arguments |
 
-Returns: JSON `{path, pid}`.
+Returns: `{pid, processName, path}`.
+
+#### `execute_shell_command`
+
+Run a shell command with piping (`|`) and chaining (`&&`, `||`, `&`). Default timeout 30s, max 120s.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `command` | string | Yes | — | Shell command to execute |
+| `cwd` | string \| null | No | null | Working directory (use forward slashes) |
+| `timeoutMs` | int | No | 30000 | Timeout in milliseconds (max 120000) |
+
+Returns: `{stdout, stderr, exitCode, success, timedOut}`. stdout/stderr truncated at 32 KB.
+
+#### `execute_python_code`
+
+Execute Python code in a sandboxed process (512 MB memory, max 120s, 262,144 char limit).
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `code` | string | Yes | — | Python code to execute (max 262,144 characters) |
+| `cwd` | string \| null | No | null | Working directory |
+| `timeoutMs` | int | No | 30000 | Timeout in milliseconds (max 120000) |
+
+Returns: `{stdout, stderr, exitCode}`.
 
 #### `get_system_info`
 
-Return OS version, CPU, RAM, disk space, and display resolution.
+No parameters. Returns: OS version, CPU, RAM, disk space, and display resolution.
 
-No parameters. Returns: JSON with system information.
+#### `wait_milliseconds`
+
+One-shot pause for animations or transitions to settle. Clamped to `[0, 5000]`.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `ms` | int | Yes | — | Wait duration in ms (typical: 500, max: 5000) |
+
+Returns: Text confirmation.
 
 ---
 
-### Browser Tools (27)
+### Browser Tools (36)
 
 The browser is Microsoft Edge. It launches automatically on the first browser tool call.
 
 #### `browser_navigate`
 
+Navigate to a URL and wait for the page to load.
+
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `url` | string | Yes | — | Full URL including protocol |
+| `url` | string | Yes | — | Full URL including protocol, e.g. `https://example.com` |
+| `waitUntil` | string | No | `"load"` | Wait condition: `load`, `networkidle0`, `networkidle2` |
 
 Returns: Text confirmation.
 
 #### `browser_back` / `browser_forward` / `browser_reload`
 
-No parameters. Navigate history or reload. Returns: Text confirmation.
+Navigate history or reload. No parameters. Returns: Text confirmation.
 
 #### `browser_get_url`
 
@@ -711,100 +740,84 @@ No parameters. Returns: Current page URL as plain string.
 
 No parameters. Returns: Current page title as plain string.
 
-#### `browser_get_text`
-
-No parameters. Returns: Visible page text as plain string, truncated at 512 KB.
-
-#### `browser_get_html`
-
-No parameters. Returns: Full page HTML source as plain string, truncated at 512 KB.
-
-#### `browser_click`
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `selector` | string | Yes | — | CSS selector (e.g. `#submit-btn`) |
-
-More reliable than coordinate-based click for browser content. Returns: Text confirmation.
-
-#### `browser_type`
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `selector` | string | Yes | — | CSS selector of input element |
-| `text` | string | Yes | — | Text to type |
-
-Returns: Text confirmation.
-
-#### `browser_query_text`
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `selector` | string | Yes | — | CSS selector |
-
-Returns: Text content of first matching element.
-
-#### `browser_wait_for`
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `selector` | string | Yes | — | CSS selector to wait for |
-| `timeoutMs` | int | No | 5000 | Timeout ms (max 30000) |
-
-Returns: Text confirmation that the element appeared, or error if timed out.
-
-#### `browser_eval_js`
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `expression` | string | Yes | — | JavaScript expression returning a string |
-
-Returns: String result of the evaluated expression.
-
 #### `browser_list_tabs`
 
-No parameters. Returns: JSON array `[{index, title, url}]`.
+No parameters. Returns: Array of `{tabId, title, url}` for each open tab.
 
-#### `browser_switch_tab` / `browser_close_tab`
+#### `browser_switch_tab`
+
+Switch to a specific tab by its identifier.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `tabIndex` | int | Yes | — | 0-based tab index |
+| `tabId` | string | Yes | — | Tab ID from `browser_list_tabs` |
 
 Returns: Text confirmation.
 
 #### `browser_new_tab`
 
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `url` | string | No | null | URL to open (blank if omitted) |
-
-Returns: JSON `{index, title, url}`.
-
-#### `browser_screenshot`
-
-No parameters. Captures browser viewport only (not full screen). Returns: MCP image content block (base64 PNG).
-
-#### `browser_select_option`
-
-Select one or more options in a `<select>` element by their `value` attribute.
+Open a new tab, optionally navigating to a URL.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `selector` | string | Yes | — | CSS selector for the `<select>` element |
-| `values` | string[] | Yes | — | Option value(s) to select |
+| `url` | string \| null | No | null | URL to open; blank tab if omitted |
 
-Returns: Text confirmation with count of selected options.
+Returns: Text confirmation.
+
+#### `browser_create_tabs`
+
+Open multiple tabs at once.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `urls` | string[] | Yes | — | URLs to open, one per tab |
+| `foregroundIndex` | int \| null | No | null | Index of tab to bring to foreground after creation |
+
+Returns: Text confirmation.
+
+#### `browser_close_tab`
+
+Close a tab. Fails if it is the last remaining tab.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `tabId` | string | Yes | — | Tab ID from `browser_list_tabs` |
+
+Returns: Text confirmation.
+
+#### `browser_click`
+
+Click a DOM element by CSS selector. More reliable than coordinate-based `click` for browser content.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `selector` | string | Yes | — | CSS selector (e.g. `#submit-btn`) |
+| `button` | string | No | `"Left"` | Mouse button: Left \| Right \| Middle \| Backward \| Forward |
+| `clickCount` | int | No | 1 | Click count: 1=single, 2=double, 3=triple |
+
+Returns: Text confirmation.
+
+#### `browser_type`
+
+Type text into a DOM element by CSS selector. Clears existing text by default.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `selector` | string | Yes | — | CSS selector of input element |
+| `text` | string | Yes | — | Text to type |
+| `clear` | bool | No | true | Clear existing text before typing |
+
+Returns: Text confirmation.
 
 #### `browser_fill_form`
 
-Fill multiple form fields at once. Each entry is a `{selector, value}` pair. Stops on first failure and reports which fields succeeded.
+Fill multiple form fields at once. Stops on first failure and reports which fields succeeded.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `fields` | object[] | Yes | — | Array of `{selector, value}` pairs |
+| `fields` | array of `{selector, value}` | Yes | — | Array of form field objects with CSS selector and value |
 
-Returns: Text confirmation with count of filled fields.
+Returns: Text confirmation with per-field status.
 
 #### `browser_drag`
 
@@ -817,102 +830,218 @@ Drag a source element onto a target element, both identified by CSS selector.
 
 Returns: Text confirmation.
 
+#### `browser_select_option`
+
+Select one or more options in a `<select>` element by `value` attribute.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `selector` | string | Yes | — | CSS selector for the `<select>` element |
+| `values` | string[] | Yes | — | Option values to select |
+
+Returns: Text confirmation.
+
+#### `browser_snapshot`
+
+Capture accessibility tree with ref IDs (e.g. `e5`) that map to DOM nodes. Refs expire on navigation.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `maxDepth` | int | No | 5 | Max tree depth (1–10) |
+| `includeIframes` | bool | No | true | Include cross-origin iframes |
+| `redactValues` | bool | No | true | Redact values in text inputs |
+
+Returns: Accessibility tree with element refs and `snapshotId`.
+
+#### `browser_click_ref`
+
+Click element by ref ID from `browser_snapshot`. Verifies nothing overlays it (hit-test).
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `snapshotId` | string | Yes | — | Snapshot ID from `browser_snapshot` |
+| `ref` | string | Yes | — | Element ref (e.g. `e5`) from snapshot |
+| `button` | string | No | `"Left"` | Mouse button: Left \| Right \| Middle \| Backward \| Forward |
+| `clickCount` | int | No | 1 | Click count: 1=single, 2=double |
+
+Returns: Text confirmation.
+
+#### `browser_type_ref`
+
+Type text into element by ref ID. Focuses element first, clears text by default.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `snapshotId` | string | Yes | — | Snapshot ID from `browser_snapshot` |
+| `ref` | string | Yes | — | Element ref (e.g. `e5`) |
+| `text` | string | Yes | — | Text to type |
+| `clear` | bool | No | true | Clear existing text first |
+
+Returns: Text confirmation.
+
+#### `browser_hover_ref`
+
+Hover over element by ref ID. Returns immediately. Fails if snapshot expired.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `snapshotId` | string | Yes | — | Snapshot ID from `browser_snapshot` |
+| `ref` | string | Yes | — | Element ref (e.g. `e5`) |
+
+Returns: Text confirmation.
+
+#### `browser_keypress_ref`
+
+Press a single key on element by ref. Focuses element first. Supports modifiers.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `snapshotId` | string | Yes | — | Snapshot ID from `browser_snapshot` |
+| `ref` | string | Yes | — | Element ref (e.g. `e5`) |
+| `key` | string | Yes | — | Key name: `Enter`, `Escape`, `Tab`, `ArrowUp`/`Down`, `F1`–`F12`, etc. |
+| `modifiers` | string[] \| null | No | null | Modifier keys: `Ctrl`, `Shift`, `Alt`, `Meta` |
+
+Returns: Text confirmation.
+
+#### `browser_scroll_ref`
+
+Scroll element into view by ref, optionally scroll by delta within element.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `snapshotId` | string | Yes | — | Snapshot ID from `browser_snapshot` |
+| `ref` | string | Yes | — | Element ref (e.g. `e5`) |
+| `deltaX` | int | No | 0 | Horizontal scroll delta in pixels |
+| `deltaY` | int | No | 0 | Vertical scroll delta in pixels |
+
+Returns: Text confirmation.
+
+#### `browser_set_file_input_ref`
+
+Set files on a file input element by ref. Files must exist in Documents, Downloads, Desktop, or TEMP.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `snapshotId` | string | Yes | — | Snapshot ID from `browser_snapshot` |
+| `ref` | string | Yes | — | Element ref for the file input |
+| `filePaths` | string[] | Yes | — | File paths to upload |
+
+Returns: Text confirmation.
+
+#### `browser_get_text`
+
+No parameters. Returns: Visible page text as plain string, truncated at 512 KB.
+
+#### `browser_get_html`
+
+No parameters. Returns: Full page HTML source as plain string, truncated at 512 KB.
+
+#### `browser_query_text`
+
+Return `innerText` of the first element matching a CSS selector.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `query` | string | Yes | — | CSS selector (e.g. `h1`, `#content`, `.message`) |
+
+Returns: `innerText` string, empty if no match.
+
+#### `browser_eval_js`
+
+Evaluate JavaScript in page context and return the result as a string.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `expression` | string | Yes | — | JavaScript expression that returns a string |
+
+Returns: Result as string.
+
+#### `browser_get_page_state`
+
+Get multiple page state fields in one call.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `fields` | string[] | Yes | — | Fields to return: `url`, `title`, `dom`, `screenshot`, `tabs` |
+
+Returns: Object with requested fields.
+
+#### `browser_screenshot`
+
+Capture the browser viewport as PNG. Content area only, not OS chrome. No parameters. Returns: PNG image.
+
+#### `browser_wait_for`
+
+Wait for a DOM element matching CSS selector to appear (default 5s, max 30s).
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `selector` | string | Yes | — | CSS selector to wait for |
+| `timeoutMs` | int | No | 5000 | Timeout in milliseconds (max 30000) |
+| `visible` | bool | No | false | Wait for element to be visible, not just in DOM |
+
+Returns: Text confirmation.
+
+#### `browser_handle_dialog`
+
+Accept or dismiss a pending browser dialog (alert, confirm, prompt, beforeunload).
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `action` | string | Yes | — | Action: `accept` or `dismiss` |
+| `promptText` | string \| null | No | null | Text for prompt dialogs (ignored for alert/confirm) |
+
+Returns: Text confirmation or "No dialog pending".
+
+#### `browser_get_cookies`
+
+Get cookies for current page or specified URLs. Values are always redacted for security.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `urls` | string[] \| null | No | null | URLs to get cookies for (omit for current page) |
+
+Returns: Array of cookie objects with redacted values.
+
+#### `browser_set_cookies`
+
+Set cookies on the current page's domain. Adds/overwrites — does not clear existing cookies.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `cookies` | array | Yes | — | Array of cookie objects: `{name(req), value(req), domain, path, secure, httpOnly, sameSite}` |
+
+Returns: Text confirmation.
+
+#### `browser_execute_batch`
+
+Execute multiple browser actions sequentially. Stops on first failure.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `actions` | array of `{action, params}` | Yes | — | Allowed: `navigate`, `snapshot`, `click_ref`, `type_ref`, `hover_ref`, `scroll_ref`, `keypress_ref`, `wait_for`, `eval_js` |
+
+Returns: Array of results per action.
+
 #### `browser_pdf_save`
 
 Save the current page as PDF under `%USERPROFILE%` or `%TEMP%` only.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `filePath` | string | Yes | — | Destination file path under `%USERPROFILE%` or `%TEMP%`. Use forward slashes. |
+| `filePath` | string | Yes | — | Destination path (use forward slashes, e.g. `C:/Users/me/file.pdf`) |
 
-Returns: Text confirmation with saved file path.
+Returns: Saved file path.
 
-#### `browser_handle_dialog`
+#### `focus_browser`
 
-Accept or dismiss a pending browser dialog (alert, confirm, prompt, beforeunload). Returns "No dialog pending" if none active.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `action` | string | Yes | — | `accept` or `dismiss` |
-| `promptText` | string | No | null | Text for prompt dialogs (ignored for alert/confirm) |
-
-Returns: Text confirmation indicating dialog action taken.
-
-#### `browser_snapshot`
-
-Capture accessibility tree with ref IDs (e.g. `e5`) that map to DOM nodes. Use refs with `browser_click_ref`, `browser_type_ref`, `browser_hover_ref`. Refs expire on navigation.
+Focus a browser window (Edge, Chrome, Firefox). Optionally filter by URL or title substring.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `maxDepth` | int | No | 5 | Maximum tree depth 1–10 |
-| `includeIframes` | bool | No | true | Include cross-origin iframes |
+| `pattern` | string \| null | No | null | URL or title substring to match; omit to focus any browser |
 
-Returns: JSON with accessibility snapshot and ref IDs.
-
-#### `browser_click_ref`
-
-Click element by ref ID from `browser_snapshot`. Verifies nothing overlays it (hit-test). Fails if snapshot expired — retake with `browser_snapshot`.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `snapshotId` | string | Yes | — | Snapshot ID from `browser_snapshot` |
-| `ref` | string | Yes | — | Element ref (e.g. `e5`) from snapshot nodes |
-| `button` | string | No | `"Left"` | Left, Right, Middle |
-| `clickCount` | int | No | 1 | 1=single, 2=double |
-
-Returns: Text confirmation with coordinates.
-
-#### `browser_type_ref`
-
-Type text into element by ref ID from `browser_snapshot`. Focuses element first, clears text by default. Fails if snapshot expired.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `snapshotId` | string | Yes | — | Snapshot ID from `browser_snapshot` |
-| `ref` | string | Yes | — | Element ref (e.g. `e5`) from snapshot nodes |
-| `text` | string | Yes | — | Text to type |
-| `clear` | bool | No | true | Clear existing text first |
-
-Returns: Text confirmation with character count.
-
-#### `browser_hover_ref`
-
-Hover over element by ref ID from `browser_snapshot`. Returns immediately. Fails if snapshot expired — retake with `browser_snapshot`.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `snapshotId` | string | Yes | — | Snapshot ID from `browser_snapshot` |
-| `ref` | string | Yes | — | Element ref (e.g. `e5`) from snapshot nodes |
-
-Returns: Text confirmation with coordinates.
-
----
-
-### Accessibility Tools (2)
-
-#### `get_accessibility_tree`
-
-Get UI element tree for the foreground window.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `maxDepth` | int | No | 3 | Max tree depth (1–10) |
-| `maxElements` | int | No | 500 | Max elements (1–2000) |
-
-Returns: JSON tree `{role, name, value, x, y, width, height, children[...]}`.
-
-#### `find_ui_element`
-
-Find elements by text, role, or name (case-insensitive substring). At least one search parameter required.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `text` | string | No | null | Text to search (used as `name` if `name` omitted) |
-| `role` | string | No | null | UI role: Button, TextBox, CheckBox, MenuItem, etc. |
-| `name` | string | No | null | Accessible name. Takes precedence over `text`. |
-| `windowHandle` | long | No | null | Window handle (null = foreground) |
-
-Returns: JSON array of matching elements with role, name, value, x, y, width, height.
+Returns: Text confirmation.
 
 ---
 

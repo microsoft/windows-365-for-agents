@@ -6,7 +6,7 @@ Windows 365 for Agents exposes two complementary API surfaces:
 |---------|-------|-----------|---------|
 | **Graph API** | Computer-Create | IT admin / ISV | Shape and maintain the pool |
 | **Graph API** | Computer-Get | Partner application | Reserve / release a Cloud PC |
-| **MCP** | Computer-Do | AI agent | Operate the Cloud PC (54 tools) |
+| **MCP** | Computer-Do | AI agent | Operate the Cloud PC (62 tools) |
 | **MCP** | Computer-See | Partner app (on behalf of human) | Observe and co-drive |
 
 ## Environment URLs
@@ -101,6 +101,7 @@ DELETE /api/sessions/{sessionId}?api-version=2.0
 | Header | Required | Description |
 |--------|----------|-------------|
 | `Authorization` | Yes | `Bearer {token}` |
+| `x-ms-sessionId` | Yes | Idempotency key. Must be a UUID v4 and match `sessionId` in path. |
 
 ### Response
 
@@ -195,6 +196,6 @@ See full documentation: [Screen Sharing](./screen-sharing.md)
 
 ## Next Steps
 
-- [MCP Tools Reference](./mcp-tools.md) — all 54 built-in tools
+- [MCP Tools Reference](./mcp-tools.md) — all 62 built-in tools
 - [Screen Sharing](./screen-sharing.md) — human-in-the-loop controls
 - [Quick Start](./quickstart.md) — end-to-end Python example

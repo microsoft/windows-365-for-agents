@@ -154,7 +154,10 @@ mcp.close()
 httpx.delete(
     f"{SESSION_BASE}/api/sessions/{session_id}",
     params={"api-version": "2.0"},
-    headers={"Authorization": f"Bearer {TOKEN}"},
+    headers={
+        "Authorization": f"Bearer {TOKEN}",
+        "x-ms-sessionId": session_id,  # Required; must match sessionId in path
+    },
 )
 ```
 
@@ -173,6 +176,6 @@ httpx.delete(
 ## Next Steps
 
 - [Architecture Overview](./architecture.md) — understand the four-plane design
-- [MCP Tools Reference](./mcp-tools.md) — explore all 54 built-in tools
+- [MCP Tools Reference](./mcp-tools.md) — explore all 62 built-in tools
 - [API Reference](./api-reference.md) — full endpoint documentation
 - [Security](./security.md) — identity and Zero Trust model

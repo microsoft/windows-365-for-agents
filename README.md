@@ -47,7 +47,7 @@ Built on the [Windows 365](https://learn.microsoft.com/en-us/windows-365/overvie
 | [Cloud PC Pools](./docs/cloud-pc-pools.md) | Pool concepts, status, management |
 | [Provisioning](./docs/provisioning.md) | Create and manage provisioning policies in Intune |
 | [API Reference](./docs/api-reference.md) | Session checkout/checkin, MCP, screen sharing endpoints |
-| [MCP Tools](./docs/mcp-tools.md) | All 54 built-in tools: desktop, browser, accessibility |
+| [MCP Tools](./docs/mcp-tools.md) | All 62 built-in tools: desktop, browser, accessibility |
 | [Screen Sharing](./docs/screen-sharing.md) | Human-in-the-loop observation and shared control |
 | [Security](./docs/security.md) | Identity, Entra integration, Zero Trust, authentication |
 | [FAQ](./docs/faq.md) | Common questions and troubleshooting |
@@ -75,7 +75,7 @@ Built on the [Windows 365](https://learn.microsoft.com/en-us/windows-365/overvie
 │  │  ┌────────────┐ ┌─────────┐  │                           │
 │  │  │Computer-Do │ │Computer-│  │                           │
 │  │  │ (MCP Tools)│ │  See    │  │                           │
-│  │  │ 54 tools   │ │(Screen  │  │                           │
+│  │  │ 62 tools   │ │(Screen  │  │                           │
 │  │  │ Desktop,   │ │ Share)  │  │                           │
 │  │  │ Browser,   │ │ WebRTC  │  │                           │
 │  │  │ A11y       │ │         │  │                           │
