@@ -1,7 +1,7 @@
 {
     "$schema": "https://developer.microsoft.com/json-schemas/teams/v1.22/MicrosoftTeams.schema.json",
     "manifestVersion": "1.22",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "id": "${{TEAMS_APP_ID}}",
     "developer": {
         "name": "Microsoft Corporation",
@@ -14,8 +14,8 @@
         "outline": "outline.png"
     },
     "name": {
-        "short": "W365A Playground Agent",
-        "full": "Windows 365 for Agents Playground Agent"
+        "short": "W365A Playground (Frontier)",
+        "full": "Windows 365 for Agents Playground Agent (Frontier)"
     },
     "description": {
         "short": "Drives a Windows 365 Cloud PC via natural language using A365 + W365A",
