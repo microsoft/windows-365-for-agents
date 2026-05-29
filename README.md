@@ -31,7 +31,7 @@ Built on the [Windows 365](https://learn.microsoft.com/en-us/windows-365/overvie
 
 - 🖥️ **Secure Cloud PCs** — Entra ID-joined, Intune-managed, governed by enterprise security policies
 - 🔄 **Check-in / Check-out model** — Agents reserve a Cloud PC per task and return it when done
-- 🤖 **54 MCP tools** — Desktop automation, browser control, accessibility, shell commands
+- 🤖 **62 MCP tools** — 26 desktop tools (mouse/keyboard, windows, processes, shell, Python) and 36 browser tools (navigation, DOM interaction, accessibility refs, batch actions)
 - 👁️ **Real-time screen sharing** — Human-in-the-loop observation and takeover via WebRTC
 - 🏢 **Enterprise-grade** — Conditional Access, compliance, audit trails built in
 - ⚡ **Pool-based scaling** — Provision pools of Cloud PCs; agents request capability, not specific machines
@@ -153,6 +153,12 @@ mcp_call("initialize", {
     "clientInfo": {"name": "MyAgent", "version": "1.0"},
 })
 
+# Send the initialized notification (no id, no response expected) before any tool call
+httpx.post(MCP_ENDPOINT, headers=MCP_HEADERS,
+           params={"api-version": "1.0"},
+           content=json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}),
+           timeout=35.0)
+
 # 4. Take a screenshot
 screenshot = mcp_call("tools/call",
     {"name": "take_screenshot", "arguments": {}}, msg_id=2)
@@ -162,11 +168,14 @@ print(screenshot)
 mcp_call("tools/call",
     {"name": "click", "arguments": {"x": 500, "y": 300}}, msg_id=3)
 
-# 6. Checkin (release the Cloud PC)
+# 6. Checkin (release the Cloud PC) — x-ms-sessionId is required and must match the path
 httpx.delete(
     f"{SESSION_BASE}/api/sessions/{session_id}",
     params={"api-version": "2.0"},
-    headers={"Authorization": f"Bearer {TOKEN}"},
+    headers={
+        "Authorization": f"Bearer {TOKEN}",
+        "x-ms-sessionId": session_id,
+    },
 )
 ```
 
