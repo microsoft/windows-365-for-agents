@@ -5,9 +5,9 @@
     "id": "${{TEAMS_APP_ID}}",
     "developer": {
         "name": "Microsoft Corporation",
-        "websiteUrl": "https://www.example.com",
-        "privacyUrl": "https://www.example.com/privacy",
-        "termsOfUseUrl": "https://www.example.com/termofuse"
+        "websiteUrl": "https://learn.microsoft.com/en-us/windows-365/agents/",
+        "privacyUrl": "https://privacy.microsoft.com/en-us/privacystatement",
+        "termsOfUseUrl": "https://learn.microsoft.com/en-us/legal/microsoft-365/supplemental-terms"
     },
     "icons": {
         "color": "color.png",

@@ -128,7 +128,10 @@ W365A-Playground-Agent/
 
 - **[step-by-step-tutorial.md](step-by-step-tutorial.md)** — full setup, deploy, common issues
 - **[Windows 365 for Agents docs](../docs/)** — platform reference (sessions, MCP tools, screen sharing)
-- **[Windows 365 for Agents MCP server reference](https://learn.microsoft.com/en-us/microsoft-agent-365/mcp-server-reference/windows-365-agents)** — full tool list for the W365 MCP server
+- **MCP server references (Preview)** — the three MCP servers wired up by this sample (see `src/ToolingManifest.json`):
+  - [Windows 365 for Agents](https://learn.microsoft.com/en-us/microsoft-agent-365/mcp-server-reference/windows-365-agents) — `mcp_W365ComputerUse`
+  - [Work IQ Mail](https://learn.microsoft.com/en-us/microsoft-agent-365/mcp-server-reference/mail) — `mcp_MailTools`
+  - [Work IQ Teams](https://learn.microsoft.com/en-us/microsoft-agent-365/mcp-server-reference/teams) — `mcp_TeamsServer`
 - [Microsoft Agent 365 Developer Docs](https://learn.microsoft.com/en-us/microsoft-agent-365/developer/)
 - [Microsoft 365 Agents SDK](https://learn.microsoft.com/en-us/microsoft-365/agents-sdk/)
 - [Microsoft Agent Framework](https://learn.microsoft.com/en-us/agent-framework/)
