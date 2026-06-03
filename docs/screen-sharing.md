@@ -31,9 +31,6 @@ Your App                              ARI Service
 
 | Environment | CDN URL |
 |-------------|---------|
-| TEST | `https://packages.global.cloudinferenceplatform.azure-test.net/screenshare-sdk/latest/screenshare-embed.js` |
-| INT | `https://packages.global.cloudinferenceplatform-int.azure.com/screenshare-sdk/latest/screenshare-embed.js` |
-| PPE | `https://packages.global.cloudinferenceplatform-ppe.azure.com/screenshare-sdk/latest/screenshare-embed.js` |
 | PROD | `https://packages.global.cloudinferenceplatform.azure.com/screenshare-sdk/latest/screenshare-embed.js` |
 
 ## Screenshare SDK Methods
