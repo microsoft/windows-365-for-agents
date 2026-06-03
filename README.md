@@ -32,7 +32,7 @@ Built on the [Windows 365](https://learn.microsoft.com/en-us/windows-365/overvie
 - 🖥️ **Secure Cloud PCs** — Entra ID-joined, Intune-managed, governed by enterprise security policies
 - 🔄 **Check-in / Check-out model** — Agents reserve a Cloud PC per task and return it when done
 - 🤖 **62 MCP tools** — 26 desktop tools (mouse/keyboard, windows, processes, shell, Python) and 36 browser tools (navigation, DOM interaction, accessibility refs, batch actions)
-- 👁️ **Real-time screen sharing** — Human-in-the-loop observation and takeover via WebRTC
+- 👁️ **Real-time screen sharing** — Human-in-the-loop observation and takeover via WebRTC, embedded with the browser-side Screenshare SDK
 - 🏢 **Enterprise-grade** — Conditional Access, compliance, audit trails built in
 - ⚡ **Pool-based scaling** — Provision pools of Cloud PCs; agents request capability, not specific machines
 
@@ -46,9 +46,9 @@ Built on the [Windows 365](https://learn.microsoft.com/en-us/windows-365/overvie
 | [Session Lifecycle](./docs/sessions.md) | Prepare → Acquire → Connect → Act → Release |
 | [Cloud PC Pools](./docs/cloud-pc-pools.md) | Pool concepts, status, management |
 | [Provisioning](./docs/provisioning.md) | Create and manage provisioning policies in Intune |
-| [API Reference](./docs/api-reference.md) | Session checkout/checkin, MCP, screen sharing endpoints |
+| [API Reference](./docs/api-reference.md) | Session checkout/checkin, MCP endpoint, Screenshare SDK |
 | [MCP Tools](./docs/mcp-tools.md) | All 62 built-in tools: desktop, browser, accessibility |
-| [Screen Sharing](./docs/screen-sharing.md) | Human-in-the-loop observation and shared control |
+| [Screen Sharing](./docs/screen-sharing.md) | Screenshare SDK (`screenshare-embed.js`) for human-in-the-loop observation and shared control |
 | [Security](./docs/security.md) | Identity, Entra integration, Zero Trust, authentication |
 | [FAQ](./docs/faq.md) | Common questions and troubleshooting |
 

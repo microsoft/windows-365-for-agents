@@ -25,7 +25,7 @@ Windows 365 for Agents exposes two complementary API surfaces:
 | `POST` | `/api/pools/{poolId}/sessions?api-version=2.0` | **Checkout:** allocate a Cloud PC |
 | `DELETE` | `/api/sessions/{sessionId}?api-version=2.0` | **Checkin:** release the Cloud PC |
 | `POST` | `/computers/{computerId}/mcp?api-version=1.0` | **MCP:** send JSON-RPC messages |
-| `POST` | `/computers/{computerId}/screenshare?screenshareAction={action}&api-version=1.0` | **Screen sharing** control |
+| _(Browser SDK)_ | `screenshare-embed.js` loaded from CDN | **Screen sharing** via Screenshare SDK |
 
 > Session endpoints (`/api/...`) use the **Session Base URL**. Device endpoints (`/computers/...`) use the **Device Base URL** (pool-scoped hostname).
 
@@ -186,10 +186,18 @@ You only need to initialize once per session.
 
 ## Screen Sharing
 
-Controls real-time screen sharing via WebRTC for human observation of agent activity.
+Controls real-time screen sharing via WebRTC for human observation of agent activity. Screen sharing is delivered through the browser-side **Screenshare SDK** (`screenshare-embed.js`) loaded from the environment CDN. The SDK creates an iframe in your page that handles all video streaming, input relay, and API calls.
 
-```
-POST /computers/{computerId}/screenshare?screenshareAction={action}&api-version=1.0
+```html
+<script src="https://packages.global.cloudinferenceplatform.azure.com/screenshare-sdk/latest/screenshare-embed.js"></script>
+<script>
+  var viewer = new ScreenShareViewer({
+    container: document.getElementById('viewer'),
+    baseUrl: checkoutResponse.computerUrl,
+    computerId: checkoutResponse.computerId
+  });
+  viewer.connect(bearerToken);
+</script>
 ```
 
 See full documentation: [Screen Sharing](./screen-sharing.md)

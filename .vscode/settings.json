@@ -3,6 +3,8 @@
         "New-Object": true,
         "ForEach-Object": true,
         "Out-File": true,
-        "Get-Item": true
+        "Get-Item": true,
+        "Add-Type": true,
+        "Resolve-Path": true
     }
 }
