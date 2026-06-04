@@ -242,7 +242,12 @@ a365.config.json
 # Local runtime artifacts
 app.zip
 publish.zip
+publish-out.zip
 backup/
+
+# .http scratch files — may contain inlined secrets (bearer tokens, client
+# secrets) for direct MCP / API exercise. Keep local only.
+*.http
 manifest/
 
 # Agent 365 CLI backup files (contain real IDs)

@@ -80,6 +80,34 @@ builder.Services.AddSingleton<ResponsesOrchestrator>();
 
 var app = builder.Build();
 
+// Graceful W365 session cleanup on process shutdown. The W365 MCP gateway holds Cloud PC
+// session checkouts on our behalf; abandoning them on app shutdown leaks the entitlement
+// for several minutes until the gateway's idle timer reaps them. EndAllSessionsAsync walks
+// every active conversation × sessionId and best-effort calls EndSession. Bounded at 15s
+// so we never hang the host beyond its 30s default ShutdownTimeout.
+var lifetime = app.Services.GetRequiredService<IHostApplicationLifetime>();
+var orchestratorForShutdown = app.Services.GetRequiredService<ResponsesOrchestrator>();
+var shutdownLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("W365ShutdownCleanup");
+lifetime.ApplicationStopping.Register(() =>
+{
+    shutdownLogger.LogInformation("ApplicationStopping fired — beginning W365 session cleanup (bounded 15s).");
+    var startedAt = DateTime.UtcNow;
+    try
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        orchestratorForShutdown.EndAllSessionsAsync(cts.Token).GetAwaiter().GetResult();
+        shutdownLogger.LogInformation(
+            "W365 session cleanup finished in {ElapsedMs} ms.",
+            (long)(DateTime.UtcNow - startedAt).TotalMilliseconds);
+    }
+    catch (Exception ex)
+    {
+        shutdownLogger.LogWarning(ex,
+            "W365 shutdown cleanup encountered an unexpected error after {ElapsedMs} ms.",
+            (long)(DateTime.UtcNow - startedAt).TotalMilliseconds);
+    }
+});
+
 if (app.Environment.IsDevelopment())
 {
     app.UseDeveloperExceptionPage();

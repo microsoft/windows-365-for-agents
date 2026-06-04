@@ -35,4 +35,10 @@
 
 	</ItemGroup>
 
+	<!-- Exclude A365 CLI local-only config files from build output and publish.
+	     These contain tenant IDs and client secrets and must never be deployed. -->
+	<ItemGroup>
+		<Content Update="a365.config.json;a365.config.*.json;a365.generated.config.json" CopyToOutputDirectory="Never" CopyToPublishDirectory="Never" />
+	</ItemGroup>
+
 </Project>

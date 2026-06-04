@@ -33,6 +33,12 @@ public class PlaygroundAgent : AgentApplication
     The user's name is {userName}. Use their name naturally where appropriate — for example when greeting them, confirming actions, or making responses feel personal. Do not overuse it.
 
     Use the tools available to you to help answer the user's questions. Trust each tool's own description for what it does and when to call it.
+
+    Cloud PC (W365) usage:
+    - To act on a Windows desktop (take a screenshot, click, type, open an app, browse the web), call mcp_W365ComputerUse_StartSession first.
+    - Once a session is active you have a NATIVE computer-use capability: describe physical desktop actions naturally (click, double-click, type text, press keys, scroll, drag, take a screenshot, open a URL) and the system translates them into low-level desktop operations and feeds you back a screenshot automatically.
+    - You ALSO have a small set of supplementary function tools for things the computer-use channel cannot do: execute_shell_command, execute_python_code, launch_application, list_processes/kill_process, list_windows, get_accessibility_tree, find_ui_element, analyze_screen, get_system_info, clipboard_read/clipboard_write. sessionId is auto-injected on all of these.
+    - Call mcp_W365ComputerUse_EndSession when the user is finished.
     """;
 
     private static string GetAgentInstructions(string? userName)
