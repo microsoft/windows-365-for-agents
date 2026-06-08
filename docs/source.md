@@ -115,7 +115,7 @@ Partner App
 
 Session endpoints handle lifecycle (allocate/release). Device endpoints handle runtime commands.
 
-`connectivityUrl` in the checkout response may be null. Always use `computerUrl` for MCP and `screenshareUrl` for screen sharing.
+`connectivityUrl` in the checkout response may be null. Use `computerUrl` for MCP, and pass the same `computerUrl` verbatim to the Screenshare SDK for screen sharing. `screenshareUrl` is the direct screenshare REST endpoint (the SDK calls it for you).
 
 ### Environment URLs
 
@@ -296,12 +296,12 @@ POST /api/pools/{poolId}/sessions?api-version=2.0
   "sessionId": "a1b2c3d4-...",
   "status": "Succeeded",
   "connectivityUrl": null,
-  "computerUrl": "https://{poolId}.{region}.remotinginterface.../computers/{computerId}",
+  "computerUrl": "https://{poolId}.{region}.remotinginterface.../computers/{computerId}?api-version=1.0",
   "screenshareUrl": "https://{poolId}.{region}.remotinginterface.../computers/{computerId}/screenshare"
 }
 ```
 
-`connectivityUrl` may be null. Always use `computerUrl` for MCP and `screenshareUrl` for screen sharing.
+`connectivityUrl` may be null. Use `computerUrl` for MCP, and pass the same `computerUrl` verbatim to the Screenshare SDK for screen sharing. `screenshareUrl` is the direct screenshare REST endpoint (the SDK calls it for you).
 
 **Error Responses:**
 

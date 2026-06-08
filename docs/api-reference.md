@@ -55,12 +55,12 @@ POST /api/pools/{poolId}/sessions?api-version=2.0
   "sessionId": "a1b2c3d4-...",
   "status": "Succeeded",
   "connectivityUrl": null,
-  "computerUrl": "https://{poolId}.{region}.remotinginterface.../computers/{computerId}",
+  "computerUrl": "https://{poolId}.{region}.remotinginterface.../computers/{computerId}?api-version=1.0",
   "screenshareUrl": "https://{poolId}.{region}.remotinginterface.../computers/{computerId}/screenshare"
 }
 ```
 
-> **Note:** `connectivityUrl` may be null. Always use `computerUrl` for MCP and `screenshareUrl` for screen sharing.
+> **Note:** `connectivityUrl` may be null. Use `computerUrl` for MCP, and pass the same `computerUrl` **verbatim** to the [Screenshare SDK](./screen-sharing.md) for screen sharing. `screenshareUrl` is the direct screenshare REST endpoint (the SDK calls it for you).
 
 ### Error Responses
 
@@ -189,12 +189,12 @@ You only need to initialize once per session.
 Controls real-time screen sharing via WebRTC for human observation of agent activity. Screen sharing is delivered through the browser-side **Screenshare SDK** (`screenshare-embed.js`) loaded from the environment CDN. The SDK creates an iframe in your page that handles all video streaming, input relay, and API calls.
 
 ```html
-<script src="https://packages.global.cloudinferenceplatform.azure.com/screenshare-sdk/latest/screenshare-embed.js"></script>
+<script src="https://packages.global.cloudinferenceplatform.azure.com/screenshare-sdk/1.0.0/screenshare-embed.js"></script>
 <script>
   var viewer = new ScreenShareViewer({
     container: document.getElementById('viewer'),
-    baseUrl: checkoutResponse.computerUrl,
-    computerId: checkoutResponse.computerId
+    computerUrl: checkoutResponse.computerUrl,  // ARI-issued URL, passed verbatim
+    viewerUrl: 'https://packages.global.cloudinferenceplatform.azure.com/screenshare-sdk/1.0.0'
   });
   viewer.connect(bearerToken);
 </script>
