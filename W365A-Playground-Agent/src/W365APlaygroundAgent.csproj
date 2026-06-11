@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
 	<PropertyGroup>
-		<TargetFramework>net8.0</TargetFramework>
+		<TargetFramework>net10.0</TargetFramework>
 		<RootNamespace>Microsoft.W365APlaygroundAgent</RootNamespace>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<UserSecretsId>7a8f9d79-5c4c-495f-8d56-1db8168ef8bd</UserSecretsId>

@@ -1,6 +1,6 @@
 # Windows 365 for Agents Playground
 
-A .NET 8 sample agent that drives a [Windows 365](https://learn.microsoft.com/en-us/windows-365/)
+A .NET 10 sample agent that drives a [Windows 365](https://learn.microsoft.com/en-us/windows-365/)
 Cloud PC via natural language. Built on the
 [Microsoft 365 Agents SDK](https://learn.microsoft.com/en-us/microsoft-365/agents-sdk/) for hosting,
 [Microsoft Agent 365](https://learn.microsoft.com/en-us/microsoft-agent-365/) for the
@@ -30,7 +30,7 @@ By following this sample end-to-end, you will:
 
 | Goal | What you need |
 |---|---|
-| Compile and run locally (no Cloud PC) | .NET 8 SDK, Azure OpenAI resource |
+| Compile and run locally (no Cloud PC) | .NET 10 SDK, Azure OpenAI resource |
 | Full A365 production deployment | + Azure subscription, [`a365` CLI](https://learn.microsoft.com/en-us/microsoft-agent-365/developer/agent-365-cli), Entra tenant admin (or Agent ID Developer role) |
 | Full Cloud PC computer use | + [Agent 365 Frontier Program](https://adoption.microsoft.com/copilot/frontier-program/) enrollment + provisioned [Windows 365 Cloud PC agent pool](../docs/cloud-pc-pools.md) |
 
