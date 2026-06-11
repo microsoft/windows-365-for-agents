@@ -10,7 +10,7 @@ Step-by-step guide to set up, run, and deploy the Windows 365 for Agents Playgro
 
 ## Prerequisites
 
-- [.NET 8.0 SDK](https://dotnet.microsoft.com/download)
+- [.NET 10.0 SDK](https://dotnet.microsoft.com/download)
 - Azure subscription (for both Azure OpenAI and the production App Service deployment)
 - Azure OpenAI resource (endpoint, API key, deployment name, API version)
 - For Cloud PC Computer Use: [Agent 365 Frontier Program enrollment](https://adoption.microsoft.com/copilot/frontier-program/) and a Windows 365 Cloud PC agent pool. Approval can take several days; you can proceed with steps 1–4 (everything except the actual Cloud PC interaction) while you wait.
@@ -291,7 +291,7 @@ $env:MCP_PLATFORM_ENDPOINT = "http://localhost:5309"
 
 ## Deploy to Azure or other cloud services
 
-The build artifact is a standard .NET 8 ASP.NET Core app, so any .NET 8 host works (Azure App Service, AWS Elastic Beanstalk, GCP App Engine, on-prem IIS, container). The example below uses Azure App Service; adapt the deploy/credentials commands to your platform.
+The build artifact is a standard .NET 10 ASP.NET Core app, so any .NET 10 host works (Azure App Service, AWS Elastic Beanstalk, GCP App Engine, on-prem IIS, container). The example below uses Azure App Service; adapt the deploy/credentials commands to your platform.
 
 ```powershell
 # Build and publish

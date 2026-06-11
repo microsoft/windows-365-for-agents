@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
 	<PropertyGroup>
-		<TargetFramework>net8.0</TargetFramework>
+		<TargetFramework>net10.0</TargetFramework>
 		<RootNamespace>Microsoft.W365APlaygroundAgent</RootNamespace>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<UserSecretsId>7a8f9d79-5c4c-495f-8d56-1db8168ef8bd</UserSecretsId>
@@ -18,17 +18,17 @@
 		<PackageReference Include="AdaptiveCards" Version="3.1.0" />
 		<PackageReference Include="Azure.AI.OpenAI" Version="2.9.0-beta.1" />
 		<PackageReference Include="Azure.Identity" Version="1.21.0" />
-		<PackageReference Include="Microsoft.Agents.AI" Version="1.5.0" />
-		<PackageReference Include="Microsoft.Agents.Authentication.Msal" Version="1.5.181" />
-		<PackageReference Include="Microsoft.Agents.Hosting.AspNetCore" Version="1.5.181" />
-		<PackageReference Include="Microsoft.Extensions.AI.OpenAI" Version="10.5.2" />
+		<PackageReference Include="Microsoft.Agents.AI" Version="1.10.0" />
+		<PackageReference Include="Microsoft.Agents.Authentication.Msal" Version="1.5.184" />
+		<PackageReference Include="Microsoft.Agents.Hosting.AspNetCore" Version="1.5.184" />
+		<PackageReference Include="Microsoft.Extensions.AI.OpenAI" Version="10.7.0" />
 
 		<!-- Telemetry Packages -->
 		<PackageReference Include="Azure.Monitor.OpenTelemetry.AspNetCore" Version="1.*" />
-		<PackageReference Include="Microsoft.Extensions.Http.Resilience" Version="10.5.0" />
-		<PackageReference Include="Microsoft.Extensions.ServiceDiscovery" Version="10.5.0" />
-		<PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.15.3" />
-		<PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.15.3" />
+		<PackageReference Include="Microsoft.Extensions.Http.Resilience" Version="10.7.0" />
+		<PackageReference Include="Microsoft.Extensions.ServiceDiscovery" Version="10.7.0" />
+		<PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.16.0" />
+		<PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.16.0" />
 		<PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.15.2" />
 		<PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.15.1" />
 		<PackageReference Include="OpenTelemetry.Instrumentation.Runtime" Version="1.15.1" />

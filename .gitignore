@@ -10,3 +10,12 @@ investigation-state.md
 
 # Local knowledge / TODO notes (work-in-progress thoughts, not for sharing)
 local-notes/
+
+# .NET publish outputs (local artifacts)
+publish-out/
+publish-test/
+**/publish-out/
+**/publish-test/
+
+# Local GitHub Copilot CLI instructions (not for public consumption)
+.github/
