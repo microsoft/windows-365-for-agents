@@ -255,14 +255,14 @@ public sealed class ResponsesOrchestrator
 
         var endpoint = (configuration["AIServices:AzureOpenAI:Endpoint"]
             ?? throw new InvalidOperationException("AIServices:AzureOpenAI:Endpoint is required.")).TrimEnd('/');
-        var apiVersion = configuration["AIServices:AzureOpenAI:ApiVersion"]
-            ?? throw new InvalidOperationException("AIServices:AzureOpenAI:ApiVersion is required.");
         _model = configuration["AIServices:AzureOpenAI:DeploymentName"]
             ?? throw new InvalidOperationException("AIServices:AzureOpenAI:DeploymentName is required.");
         _apiKey = configuration["AIServices:AzureOpenAI:ApiKey"]
             ?? throw new InvalidOperationException("AIServices:AzureOpenAI:ApiKey is required.");
 
-        _responsesUrl = $"{endpoint}/openai/responses?api-version={apiVersion}";
+        // Azure OpenAI v1 API surface — drops the dated api-version query parameter.
+        // See: https://learn.microsoft.com/azure/foundry/openai/api-version-lifecycle
+        _responsesUrl = $"{endpoint}/openai/v1/responses";
     }
 
     /// <summary>
