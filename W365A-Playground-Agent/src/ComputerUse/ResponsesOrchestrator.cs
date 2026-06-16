@@ -11,6 +11,7 @@ using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Net.Http;
 using System.Text.Json.Serialization;
 
 namespace Microsoft.W365APlaygroundAgent.ComputerUse;
@@ -649,6 +650,15 @@ public sealed class ResponsesOrchestrator
             }
             catch (Exception ex)
             {
+                // If the MCP transport returned 401, the gateway session has expired.
+                // Reset the one-shot latch so the next RunAsync re-resolves the IMcpClient
+                // from a fresh McpClientTool transport.
+                if (ex is HttpRequestException httpEx && httpEx.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+                {
+                    _logger.LogWarning("MCP 401 detected — resetting W365McpClientResolved latch for reconnect on next turn.");
+                    state.W365McpClientResolved = false;
+                    state.W365McpClient = null;
+                }
                 _logger.LogWarning(ex,
                     "computer_call MCP dispatch failed: action='{ActionType}' tool='{Tool}' (callId={CallId}).",
                     actionType, toolName, callId);
@@ -831,8 +841,19 @@ public sealed class ResponsesOrchestrator
     {
         if (state.W365McpClient is null || string.IsNullOrEmpty(state.W365SessionId)) return null;
         var args = new Dictionary<string, object?> { ["sessionId"] = state.W365SessionId };
-        var result = await state.W365McpClient.CallToolAsync("take_screenshot", args, cancellationToken: cancellationToken)
-            .ConfigureAwait(false);
+        CallToolResponse result;
+        try
+        {
+            result = await state.W365McpClient.CallToolAsync("take_screenshot", args, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+        {
+            _logger.LogWarning("CaptureScreenshotAsync: MCP 401 — resetting W365McpClientResolved latch.");
+            state.W365McpClientResolved = false;
+            state.W365McpClient = null;
+            return null;
+        }
         var extracted = ExtractBase64FromResult(result);
         if (extracted is { } e)
         {
@@ -1137,6 +1158,9 @@ public sealed class ResponsesOrchestrator
     private void EnsureW365McpClient(IList<AITool> tools, ConversationState state)
     {
         if (state.W365McpClientResolved) return;
+        // Log if this is a re-resolution attempt (latch was reset after a 401).
+        if (state.W365McpClient is not null)
+            _logger.LogInformation("Re-resolving W365 IMcpClient (previous transport returned 401).");
         state.W365McpClientResolved = true;
 
         if (McpClientToolClientField == null)
