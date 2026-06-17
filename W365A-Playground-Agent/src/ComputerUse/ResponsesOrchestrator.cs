@@ -1185,10 +1185,10 @@ public sealed class ResponsesOrchestrator
     }
 
     /// <summary>
-    /// Central 401-recovery for every MCP call site. If <paramref name="ex"/> is — or
+    /// Central 401-recovery for W365 MCP call sites. If <paramref name="ex"/> is — or
     /// wraps — an <see cref="HttpRequestException"/> with status 401, resets the one-shot
     /// MCP transport latch so the next <see cref="RunAsync"/> turn re-resolves the
-    /// <see cref="IMcpClient"/> from a fresh <see cref="McpClientTool"/> transport.
+    /// cached <see cref="IMcpClient"/> from a fresh <see cref="McpClientTool"/> transport.
     /// Returns <c>true</c> when a 401 was detected; <c>false</c> otherwise.
     /// </summary>
     private bool TryHandleMcp401(Exception ex, ConversationState state, [CallerMemberName] string? caller = null)
