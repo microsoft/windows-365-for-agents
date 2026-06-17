@@ -494,7 +494,10 @@ public sealed class ResponsesOrchestrator
         }
         catch (Exception ex)
         {
-            TryHandleMcp401(ex, state);
+            // Only attempt W365 401 recovery for W365 tools; an unrelated 401 from a
+            // non-W365 MCP server (mail/teams) must not reset the W365 transport latch.
+            if (W365LifecycleToolNames.Contains(func.Name) || W365SupplementaryDesktopTools.Contains(func.Name))
+                TryHandleMcp401(ex, state);
             _logger.LogWarning(ex, "Tool '{Name}' invocation failed.", func.Name);
             history.Add(MakeFunctionCallOutput(callId, $"Tool error: {ex.Message}"));
             return;
@@ -1182,22 +1185,26 @@ public sealed class ResponsesOrchestrator
     }
 
     /// <summary>
-    /// Central 401-recovery for every MCP call site. If <paramref name="ex"/> wraps an
-    /// <see cref="HttpRequestException"/> with status 401, resets the one-shot MCP transport
-    /// latch so the next <see cref="RunAsync"/> turn re-resolves the <see cref="IMcpClient"/>
-    /// from a fresh <see cref="McpClientTool"/> transport.
+    /// Central 401-recovery for every MCP call site. If <paramref name="ex"/> is — or
+    /// wraps — an <see cref="HttpRequestException"/> with status 401, resets the one-shot
+    /// MCP transport latch so the next <see cref="RunAsync"/> turn re-resolves the
+    /// <see cref="IMcpClient"/> from a fresh <see cref="McpClientTool"/> transport.
     /// Returns <c>true</c> when a 401 was detected; <c>false</c> otherwise.
     /// </summary>
     private bool TryHandleMcp401(Exception ex, ConversationState state, [CallerMemberName] string? caller = null)
     {
-        if (ex is HttpRequestException { StatusCode: System.Net.HttpStatusCode.Unauthorized })
+        // Walk the exception chain — the MCP SDK may wrap the underlying 401.
+        for (Exception? e = ex; e is not null; e = e.InnerException)
         {
-            _logger.LogWarning(
-                "MCP 401 in {Caller} — resetting W365McpClientResolved latch; transport will re-resolve on next turn.",
-                caller);
-            state.W365McpClientResolved = false;
-            state.W365McpClient = null;
-            return true;
+            if (e is HttpRequestException { StatusCode: System.Net.HttpStatusCode.Unauthorized })
+            {
+                _logger.LogWarning(
+                    "MCP 401 in {Caller} — resetting W365McpClientResolved latch; transport will re-resolve on next turn.",
+                    caller);
+                state.W365McpClientResolved = false;
+                state.W365McpClient = null;
+                return true;
+            }
         }
         return false;
     }
