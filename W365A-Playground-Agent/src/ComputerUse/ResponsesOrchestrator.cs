@@ -236,6 +236,14 @@ public sealed class ResponsesOrchestrator
 
     private const int MaxConversations = 100;
 
+    // wi-017 reactive MCP 401 recovery bounds (configurable via appsettings ToolCache:*).
+    private readonly int _max401RetriesPerCall;
+    private readonly int _max401ReacquiresPerTurn;
+
+    // Result of a single function-tool invocation. Mcp401 signals the caller to re-enumerate
+    // tools (fresh token) and retry; no paired output is appended yet in that case.
+    private enum ToolCallOutcome { Completed, Mcp401 }
+
     // Default media type when a W365 image content block omits the mimeType field. Per
     // docs/mcp-tools.md (take_screenshot, zoom_region) the server returns base64 PNG.
     private const string DefaultImageMimeType = "image/png";
@@ -265,6 +273,10 @@ public sealed class ResponsesOrchestrator
         // Azure OpenAI v1 API surface — drops the dated api-version query parameter.
         // See: https://learn.microsoft.com/azure/foundry/openai/api-version-lifecycle
         _responsesUrl = $"{endpoint}/openai/v1/responses";
+
+        // wi-017: per-call retry and per-turn re-enumeration caps (default 1 each).
+        _max401RetriesPerCall = configuration.GetValue("ToolCache:Max401RetriesPerCall", 1);
+        _max401ReacquiresPerTurn = configuration.GetValue("ToolCache:Max401ReacquiresPerTurn", 1);
     }
 
     /// <summary>
@@ -277,6 +289,7 @@ public sealed class ResponsesOrchestrator
         string userMessage,
         string instructions,
         IList<AITool> tools,
+        Func<CancellationToken, Task<IList<AITool>>> reacquireTools,
         ITurnContext turnContext,
         CancellationToken cancellationToken)
     {
@@ -310,50 +323,67 @@ public sealed class ResponsesOrchestrator
         }
 
         var history = state.History;
+        // Per-turn tool plumbing, rebuildable so a mid-turn 401 reacquire can swap in
+        // fresh-token transports without restarting the model loop (names/schemas are identical).
+        //
         // Deduplicate tools by name, taking the first occurrence (manifest order). When multiple MCP
-        // servers expose a tool with the same name, later occurrences are silently dropped — for
-        // example, mcp_OneDriveRemoteServer and mcp_SharePointRemoteServer both expose
-        // "getFileOrFolderMetadataByUrl"; whichever appears first in the manifest wins.
-        // Server-name prefixing would require per-server loading and a custom AIFunction wrapper in
-        // PlaygroundAgent.cs — the server origin is not available here after GetMcpToolsAsync flattens
-        // the tool list.
-        var toolsByName = tools.OfType<AIFunction>()
-            .GroupBy(t => t.Name)
-            .ToDictionary(g => g.Key, g => g.First());
-
-        // Curated W365 supplementary function tools. We wrap ONLY tools whose
-        // name is in W365SupplementaryDesktopTools (12 non-CUA tools). All per-action CUA
-        // tools (click/type_text/etc.) and browser_* tools are dropped from the model-facing
-        // catalog — the native {type:"computer"} tool below handles those. Direct MCP
-        // dispatch for mapped computer actions doesn't need them in toolsByName either —
-        // HandleComputerCallAsync calls W365McpClient.CallToolAsync by hardcoded name.
-        var augmentedTools = new List<AITool>(tools);
-        if (state.W365McpClient is not null && state.W365DesktopToolsCatalog is { Count: > 0 } catalog)
+        // servers expose a tool with the same name, later occurrences are silently dropped. Curated
+        // W365 supplementary function tools (12 non-CUA names in W365SupplementaryDesktopTools) are
+        // wrapped; per-action CUA + browser_* tools are dropped (the native {type:"computer"} tool
+        // handles those). Always appends the native computer tool via BuildToolDefinitions.
+        Dictionary<string, AIFunction> toolsByName = null!;
+        IList<JsonElement> toolDefs = null!;
+        void BuildToolPlumbing(IList<AITool> currentTools)
         {
-            var addedCount = 0;
-            var droppedCount = 0;
-            foreach (var t in catalog)
+            toolsByName = currentTools.OfType<AIFunction>()
+                .GroupBy(t => t.Name)
+                .ToDictionary(g => g.Key, g => g.First());
+
+            var augmented = new List<AITool>(currentTools);
+            if (state.W365McpClient is not null && state.W365DesktopToolsCatalog is { Count: > 0 } catalog)
             {
-                if (!W365SupplementaryDesktopTools.Contains(t.Name)) { droppedCount++; continue; }
-                if (toolsByName.ContainsKey(t.Name)) continue;
-                var wrapper = new W365DesktopTool(t, state.W365McpClient, () => state.W365SessionId, _logger);
-                toolsByName[t.Name] = wrapper;
-                augmentedTools.Add(wrapper);
-                addedCount++;
+                var addedCount = 0;
+                var droppedCount = 0;
+                foreach (var t in catalog)
+                {
+                    if (!W365SupplementaryDesktopTools.Contains(t.Name)) { droppedCount++; continue; }
+                    if (toolsByName.ContainsKey(t.Name)) continue;
+                    var wrapper = new W365DesktopTool(t, state.W365McpClient, () => state.W365SessionId, _logger);
+                    toolsByName[t.Name] = wrapper;
+                    augmented.Add(wrapper);
+                    addedCount++;
+                }
+                _logger.LogInformation(
+                    "RunAsync: exposed {Added} curated W365 supplementary tool(s) (dropped {Dropped} CUA-redundant/browser tools) for sessionId {SessionId} (catalog size {CatalogSize}).",
+                    addedCount, droppedCount, state.W365SessionId, catalog.Count);
             }
-            _logger.LogInformation(
-                "RunAsync: exposed {Added} curated W365 supplementary tool(s) (dropped {Dropped} CUA-redundant/browser tools) for sessionId {SessionId} (catalog size {CatalogSize}).",
-                addedCount, droppedCount, state.W365SessionId, catalog.Count);
+            toolDefs = BuildToolDefinitions(augmented);
         }
-        // Always include the native {type:"computer"} tool. The model is told via system
-        // prompt to call StartSession first; if it emits computer_call without an active
-        // session, HandleComputerCallAsync returns a placeholder + corrective input_text.
-        var toolDefs = BuildToolDefinitions(augmentedTools);
+        BuildToolPlumbing(tools);
 
         _logger.LogInformation("RunAsync: conversation={Key} historyItems={Count} userMsg={Len}chars",
             conversationKey, history.Count, userMessage.Length);
 
         history.Add(MakeUserTextMessage(userMessage));
+
+        // wi-017 reactive recovery: on an MCP 401, re-enumerate MCP tools (fresh transport token)
+        // and rebuild the plumbing, bounded by _max401ReacquiresPerTurn. TryHandleMcp401 has
+        // already reset the W365 client latch, so EnsureW365McpClient re-resolves from fresh tools.
+        int reacquireCount = 0;
+        async Task<bool> TryReacquireToolsAsync()
+        {
+            if (reacquireCount >= _max401ReacquiresPerTurn)
+            {
+                _logger.LogWarning("MCP 401 reacquire budget exhausted ({Max}/turn) — not re-enumerating again this turn.", _max401ReacquiresPerTurn);
+                return false;
+            }
+            reacquireCount++;
+            _logger.LogInformation("MCP 401 recovery: re-acquiring MCP tools (attempt {N}/{Max}) for conversation {Key}.", reacquireCount, _max401ReacquiresPerTurn, conversationKey);
+            var fresh = await reacquireTools(cancellationToken).ConfigureAwait(false);
+            EnsureW365McpClient(fresh, state);
+            BuildToolPlumbing(fresh);
+            return true;
+        }
 
         // The agent loop — the canonical pattern: call model → stream text → execute any tool
         // calls the model requested → repeat until the model returns a message with no further
@@ -427,7 +457,40 @@ public sealed class ResponsesOrchestrator
                     continue;
                 }
 
-                await HandleToolCallAsync(state, history, func, callId, argumentsJson, turnContext, cancellationToken);
+                var outcome = await HandleToolCallAsync(state, history, func, callId, argumentsJson, turnContext, cancellationToken, isFinalAttempt: _max401RetriesPerCall <= 0);
+
+                // Reactive MCP 401 recovery: re-enumerate tools (fresh transport token) and retry,
+                // bounded by _max401RetriesPerCall (per call) AND _max401ReacquiresPerTurn (per turn).
+                // Every exit path appends EXACTLY ONE paired function_call_output for this call_id —
+                // including when re-acquisition itself throws (e.g. the token endpoint can't mint a
+                // fresh token) — so the OpenAI Responses API contract is never left with an orphan.
+                for (int retry = 1; outcome == ToolCallOutcome.Mcp401 && retry <= _max401RetriesPerCall; retry++)
+                {
+                    var isFinal = retry >= _max401RetriesPerCall;
+                    try
+                    {
+                        if (await TryReacquireToolsAsync().ConfigureAwait(false)
+                            && toolsByName.TryGetValue(name, out var freshFunc))
+                        {
+                            outcome = await HandleToolCallAsync(state, history, freshFunc, callId, argumentsJson, turnContext, cancellationToken, isFinalAttempt: isFinal);
+                        }
+                        else
+                        {
+                            // Reacquire budget exhausted or tool gone post-refresh — emit the single
+                            // paired output and stop.
+                            history.Add(MakeFunctionCallOutput(callId, "Tool error: MCP authorization expired (401) and could not be refreshed this turn."));
+                            outcome = ToolCallOutcome.Completed;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        // Re-enumeration itself failed. Still append exactly one paired output so the
+                        // call_id is satisfied and history is not poisoned with an orphan function_call.
+                        _logger.LogWarning(ex, "MCP 401 recovery: tool re-acquisition failed for '{Name}'; emitting paired error output.", name);
+                        history.Add(MakeFunctionCallOutput(callId, "Tool error: MCP authorization expired (401) and token refresh failed this turn."));
+                        outcome = ToolCallOutcome.Completed;
+                    }
+                }
             }
 
             // Process computer_call items serially (UI state is sequential).
@@ -444,14 +507,15 @@ public sealed class ResponsesOrchestrator
     /// Teams and injected as <c>input_image</c> for the next model call. Text results are appended
     /// as a <c>function_call_output</c> history item.
     /// </summary>
-    private async Task HandleToolCallAsync(
+    private async Task<ToolCallOutcome> HandleToolCallAsync(
         ConversationState state,
         List<JsonElement> history,
         AIFunction func,
         string callId,
         string argumentsJson,
         ITurnContext turnContext,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool isFinalAttempt)
     {
         // Parse args once so we can mutate them for W365 lifecycle auto-injection below.
         var args = ParseArguments(argumentsJson);
@@ -483,7 +547,7 @@ public sealed class ResponsesOrchestrator
             {
                 _logger.LogWarning("Tool '{Name}' BLOCKED by session validator (callId={CallId}): {Err}", func.Name, callId, switchErr);
                 history.Add(MakeFunctionCallOutput(callId, switchErr!));
-                return;
+                return ToolCallOutcome.Completed;
             }
         }
 
@@ -494,13 +558,26 @@ public sealed class ResponsesOrchestrator
         }
         catch (Exception ex)
         {
-            // Only attempt W365 401 recovery for W365 tools; an unrelated 401 from a
-            // non-W365 MCP server (mail/teams) must not reset the W365 transport latch.
-            if (W365LifecycleToolNames.Contains(func.Name) || W365SupplementaryDesktopTools.Contains(func.Name))
-                TryHandleMcp401(ex, state);
-            _logger.LogWarning(ex, "Tool '{Name}' invocation failed.", func.Name);
+            // W365 MCP 401 = expired transport token. On a non-final attempt, reset the latch and
+            // signal the caller to re-enumerate (fresh token) + retry — WITHOUT appending an output
+            // yet, so the retry owns the single paired output for this call_id. A non-W365 401
+            // (mail/teams) must not reset the W365 transport latch.
+            if ((W365LifecycleToolNames.Contains(func.Name) || W365SupplementaryDesktopTools.Contains(func.Name))
+                && TryHandleMcp401(ex, state))
+            {
+                if (!isFinalAttempt)
+                {
+                    _logger.LogWarning("Tool '{Name}' hit MCP 401 — signaling reacquire+retry.", func.Name);
+                    return ToolCallOutcome.Mcp401;
+                }
+                _logger.LogWarning(ex, "Tool '{Name}' still 401 after token refresh; giving up this turn.", func.Name);
+            }
+            else
+            {
+                _logger.LogWarning(ex, "Tool '{Name}' invocation failed.", func.Name);
+            }
             history.Add(MakeFunctionCallOutput(callId, $"Tool error: {ex.Message}"));
-            return;
+            return ToolCallOutcome.Completed;
         }
 
         // W365 lifecycle post-processing: track/remove sessions in the conversation's
@@ -542,6 +619,8 @@ public sealed class ResponsesOrchestrator
                 _logger.LogDebug("Tool '{Name}' result body: {Result}", func.Name, resultStr);
             history.Add(MakeFunctionCallOutput(callId, resultStr));
         }
+
+        return ToolCallOutcome.Completed;
     }
 
     /// <summary>

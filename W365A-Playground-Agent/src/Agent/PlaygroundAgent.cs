@@ -68,15 +68,22 @@ public class PlaygroundAgent : AgentApplication
     private readonly string? _oboAuthHandlerName;
 
     // Caches MCP tools per user (keyed by user.toolCacheKey resolved in GetToolCacheKey).
-    // MCP tool enumeration is expensive, so we resolve once per user and reuse for the
-    // lifetime of the process. Capped via simple LRU eviction to bound memory growth.
+    // MCP tool enumeration is expensive, so we resolve per user and reuse. Entries are
+    // bounded by a TTL (ToolCache:TtlMinutes) because each McpClientTool bakes a STATIC
+    // bearer token into its HTTP transport at enumeration time; once that token expires
+    // the gateway returns 401 (wi-017). The TTL forces re-enumeration before expiry.
+    // Also capped via simple LRU eviction to bound memory growth.
     private const int MaxToolCacheEntries = 1000;
     private sealed class ToolCacheEntry
     {
         public required IReadOnlyList<AITool> Tools { get; init; }
         public DateTime LastAccessed { get; set; } = DateTime.UtcNow;
+        public DateTime CreatedAt { get; init; } = DateTime.UtcNow;
     }
     private static readonly ConcurrentDictionary<string, ToolCacheEntry> _agentToolCache = new();
+
+    // Tool-cache TTL (configurable via appsettings ToolCache:TtlMinutes).
+    private readonly TimeSpan _toolCacheTtl;
 
     /// <summary>Returns the bearer token from the <c>BEARER_TOKEN</c> environment variable when present (development/testing flow).</summary>
     private static bool TryGetBearerTokenForDevelopment(out string? bearerToken)
@@ -119,6 +126,9 @@ public class PlaygroundAgent : AgentApplication
         // Read auth handler names from configuration (can be empty/null to disable)
         _agenticAuthHandlerName = _configuration.GetValue<string>("AgentApplication:AgenticAuthHandlerName");
         _oboAuthHandlerName = _configuration.GetValue<string>("AgentApplication:OboAuthHandlerName");
+
+        // Tool-cache TTL (wi-017). Default 45 min — below the ~87 min agentic token lifetime.
+        _toolCacheTtl = TimeSpan.FromMinutes(_configuration.GetValue("ToolCache:TtlMinutes", 45));
 
         // Greet when members are added to the conversation
         OnConversationUpdate(ConversationUpdateEvents.MembersAdded, WelcomeMessageAsync);
@@ -287,7 +297,14 @@ public class PlaygroundAgent : AgentApplication
                 var tools = await GetToolsAsync(turnContext, turnState, authHandlerName);
                 var conversationKey = turnContext.Activity.Conversation?.Id ?? Guid.NewGuid().ToString();
                 var displayName = turnContext.Activity.From?.Name;
-                await _orchestrator.RunAsync(conversationKey, userText, GetAgentInstructions(displayName), tools, turnContext, cancellationToken);
+// Reactive wi-017 recovery: lets the orchestrator re-enumerate MCP tools with a
+// fresh transport token if a tool call hits a 401 mid-turn.
+Func<CancellationToken, Task<IList<AITool>>> reacquireTools = ct =>
+{
+    ct.ThrowIfCancellationRequested();
+    return GetToolsAsync(turnContext, turnState, authHandlerName, forceRefresh: true);
+};
+await _orchestrator.RunAsync(conversationKey, userText, GetAgentInstructions(displayName), tools, reacquireTools, turnContext, cancellationToken);
             }
             finally
             {
@@ -309,7 +326,7 @@ public class PlaygroundAgent : AgentApplication
     /// <summary>
     /// Load MCP tools for this turn. Tools are cached per user session.
     /// </summary>
-    private async Task<IList<AITool>> GetToolsAsync(ITurnContext context, ITurnState turnState, string? authHandlerName)
+    private async Task<IList<AITool>> GetToolsAsync(ITurnContext context, ITurnState turnState, string? authHandlerName, bool forceRefresh = false)
     {
         AssertionHelpers.ThrowIfNull(context, nameof(context));
 
@@ -348,17 +365,27 @@ public class PlaygroundAgent : AgentApplication
             try
             {
                 string toolCacheKey = GetToolCacheKey(turnState);
-                if (_agentToolCache.TryGetValue(toolCacheKey, out var cached))
+                _agentToolCache.TryGetValue(toolCacheKey, out var cached);
+                var hit = !forceRefresh
+                    && cached is not null
+                    && (DateTime.UtcNow - cached.CreatedAt) < _toolCacheTtl
+                    && cached.Tools.Count > 0;
+                if (hit)
                 {
-                    cached.LastAccessed = DateTime.UtcNow;
-                    if (cached.Tools.Count > 0)
-                    {
-                        _logger.LogDebug("Tool cache hit ({Count} tools)", cached.Tools.Count);
-                        toolList.AddRange(cached.Tools);
-                    }
+                    cached!.LastAccessed = DateTime.UtcNow;
+                    _logger.LogDebug("Tool cache hit ({Count} tools, age {Age:F1} min)",
+                        cached.Tools.Count, (DateTime.UtcNow - cached.CreatedAt).TotalMinutes);
+                    toolList.AddRange(cached.Tools);
                 }
                 else
                 {
+                    // Stale (TTL) or forced (401 recovery): drop any existing entry so we
+                    // re-enumerate with a fresh transport token.
+                    if (_agentToolCache.TryRemove(toolCacheKey, out var stale))
+                        _logger.LogInformation("Tool cache evicted for re-enumeration (key={Key}, reason={Reason}, age {Age:F1} min).",
+                            toolCacheKey, forceRefresh ? "forceRefresh(401)" : "ttl-expired",
+                            stale is null ? 0 : (DateTime.UtcNow - stale.CreatedAt).TotalMinutes);
+
                     await context.StreamingResponse.QueueInformativeUpdateAsync("Loading tools...");
 
                     // For the bearer token (development) flow, pass the token as an override and
@@ -386,7 +413,7 @@ public class PlaygroundAgent : AgentApplication
                             _agentToolCache.TryRemove(oldest.Key, out _);
                             _logger.LogInformation("Tool cache cap reached ({Max}). Evicted: {Key}", MaxToolCacheEntries, oldest.Key);
                         }
-                        _agentToolCache.TryAdd(toolCacheKey, new ToolCacheEntry { Tools = [.. a365Tools] });
+                        _agentToolCache[toolCacheKey] = new ToolCacheEntry { Tools = [.. a365Tools] };
                     }
                 }
             }
