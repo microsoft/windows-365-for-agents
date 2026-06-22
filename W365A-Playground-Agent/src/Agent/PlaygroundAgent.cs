@@ -297,11 +297,14 @@ public class PlaygroundAgent : AgentApplication
                 var tools = await GetToolsAsync(turnContext, turnState, authHandlerName);
                 var conversationKey = turnContext.Activity.Conversation?.Id ?? Guid.NewGuid().ToString();
                 var displayName = turnContext.Activity.From?.Name;
-                // Reactive wi-017 recovery: lets the orchestrator re-enumerate MCP tools with a
-                // fresh transport token if a tool call hits a 401 mid-turn.
-                Func<CancellationToken, Task<IList<AITool>>> reacquireTools =
-                    ct => GetToolsAsync(turnContext, turnState, authHandlerName, forceRefresh: true);
-                await _orchestrator.RunAsync(conversationKey, userText, GetAgentInstructions(displayName), tools, reacquireTools, turnContext, cancellationToken);
+// Reactive wi-017 recovery: lets the orchestrator re-enumerate MCP tools with a
+// fresh transport token if a tool call hits a 401 mid-turn.
+Func<CancellationToken, Task<IList<AITool>>> reacquireTools = ct =>
+{
+    ct.ThrowIfCancellationRequested();
+    return GetToolsAsync(turnContext, turnState, authHandlerName, forceRefresh: true);
+};
+await _orchestrator.RunAsync(conversationKey, userText, GetAgentInstructions(displayName), tools, reacquireTools, turnContext, cancellationToken);
             }
             finally
             {
