@@ -434,6 +434,7 @@ await _orchestrator.RunAsync(conversationKey, userText, GetAgentInstructions(dis
                         {
                             var oldest = _agentToolCache.MinBy(kvp => kvp.Value.LastAccessed);
                             _agentToolCache.TryRemove(oldest.Key, out _);
+                            _lastTokenExpByCacheKey.TryRemove(oldest.Key, out _); // keep Signal-2 dict bounded to the tool cache
                             _logger.LogInformation("Tool cache cap reached ({Max}). Evicted: {Key}", MaxToolCacheEntries, oldest.Key);
                         }
                         _agentToolCache[toolCacheKey] = new ToolCacheEntry { Tools = [.. a365Tools] };

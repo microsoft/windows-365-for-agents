@@ -595,14 +595,15 @@ public sealed class ResponsesOrchestrator
                 if (!isFinalAttempt)
                 {
                     _logger.LogWarning("Tool '{Name}' hit MCP 401 — signaling reacquire+retry.", func.Name);
-                    return ToolCallOutcome.Mcp401;
+                    return ToolCallOutcome.Mcp401; // retry owns the single paired output
                 }
+                // Final attempt still 401 — emit the paired output here and signal a genuine
+                // (unrecovered) 401 so the classifier distinguishes it from a real recovery.
                 _logger.LogWarning(ex, "Tool '{Name}' still 401 after token refresh; giving up this turn.", func.Name);
+                history.Add(MakeFunctionCallOutput(callId, $"Tool error: {ex.Message}"));
+                return ToolCallOutcome.Mcp401;
             }
-            else
-            {
-                _logger.LogWarning(ex, "Tool '{Name}' invocation failed.", func.Name);
-            }
+            _logger.LogWarning(ex, "Tool '{Name}' invocation failed.", func.Name);
             history.Add(MakeFunctionCallOutput(callId, $"Tool error: {ex.Message}"));
             return ToolCallOutcome.Completed;
         }
