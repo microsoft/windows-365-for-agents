@@ -473,8 +473,9 @@ public sealed class ResponsesOrchestrator
                 // Every exit path appends EXACTLY ONE paired function_call_output for this call_id —
                 // including when re-acquisition itself throws (e.g. the token endpoint can't mint a
                 // fresh token) — so the OpenAI Responses API contract is never left with an orphan.
-                bool entered401 = outcome == ToolCallOutcome.Mcp401;
-                bool recovered = false;
+lastReacquireTokenRefreshed = null; // Signal 2 applies only to reacquires attempted for this tool call
+bool entered401 = outcome == ToolCallOutcome.Mcp401;
+bool recovered = false;
                 for (int retry = 1; outcome == ToolCallOutcome.Mcp401 && retry <= _max401RetriesPerCall; retry++)
                 {
                     var isFinal = retry >= _max401RetriesPerCall;
