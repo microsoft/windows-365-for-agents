@@ -13,6 +13,7 @@ using Microsoft.Agents.Core;
 using Microsoft.Agents.Core.Models;
 using Microsoft.Extensions.AI;
 using System.Collections.Concurrent;
+using System.Text.Json;
 
 namespace Microsoft.W365APlaygroundAgent.Agent;
 
@@ -67,29 +68,42 @@ public class PlaygroundAgent : AgentApplication
     private readonly string? _agenticAuthHandlerName;
     private readonly string? _oboAuthHandlerName;
 
-    // Caches MCP tools per user (keyed by user.toolCacheKey resolved in GetToolCacheKey).
-    // MCP tool enumeration is expensive, so we resolve per user and reuse. Entries are
-    // bounded by a TTL (ToolCache:TtlMinutes) because each McpClientTool bakes a STATIC
-    // bearer token into its HTTP transport at enumeration time; once that token expires
-    // the gateway returns 401 (wi-017). The TTL forces re-enumeration before expiry.
-    // Also capped via simple LRU eviction to bound memory growth.
+    // Caches MCP tools per user (keyed by GetToolCacheKey). Evicted reactively on a 401
+    // (forceRefresh), which re-mints the static transport token. LRU-capped for memory.
     private const int MaxToolCacheEntries = 1000;
     private sealed class ToolCacheEntry
     {
         public required IReadOnlyList<AITool> Tools { get; init; }
         public DateTime LastAccessed { get; set; } = DateTime.UtcNow;
-        public DateTime CreatedAt { get; init; } = DateTime.UtcNow;
     }
     private static readonly ConcurrentDictionary<string, ToolCacheEntry> _agentToolCache = new();
 
-    // Tool-cache TTL (configurable via appsettings ToolCache:TtlMinutes).
-    private readonly TimeSpan _toolCacheTtl;
+    // Signal 2 (401 classification): last agentic-token exp per cache key, to detect whether a
+    // forced re-enumeration minted a fresh token. Carried out via _lastForceRefreshTokenRefreshed.
+    private static readonly ConcurrentDictionary<string, long> _lastTokenExpByCacheKey = new();
+    private bool? _lastForceRefreshTokenRefreshed;
 
     /// <summary>Returns the bearer token from the <c>BEARER_TOKEN</c> environment variable when present (development/testing flow).</summary>
     private static bool TryGetBearerTokenForDevelopment(out string? bearerToken)
     {
         bearerToken = Environment.GetEnvironmentVariable("BEARER_TOKEN");
         return !string.IsNullOrEmpty(bearerToken);
+    }
+
+    /// <summary>Best-effort decode of a JWT's <c>exp</c> claim (Unix seconds). Null if not a JWT.</summary>
+    private static long? TryGetJwtExp(string? token)
+    {
+        if (string.IsNullOrEmpty(token)) return null;
+        try
+        {
+            var parts = token.Split('.');
+            if (parts.Length < 2) return null;
+            var p = parts[1].Replace('-', '+').Replace('_', '/');
+            switch (p.Length % 4) { case 2: p += "=="; break; case 3: p += "="; break; }
+            using var doc = JsonDocument.Parse(Convert.FromBase64String(p));
+            return doc.RootElement.TryGetProperty("exp", out var e) && e.TryGetInt64(out var exp) ? exp : null;
+        }
+        catch { return null; }
     }
 
     /// <summary>
@@ -126,9 +140,6 @@ public class PlaygroundAgent : AgentApplication
         // Read auth handler names from configuration (can be empty/null to disable)
         _agenticAuthHandlerName = _configuration.GetValue<string>("AgentApplication:AgenticAuthHandlerName");
         _oboAuthHandlerName = _configuration.GetValue<string>("AgentApplication:OboAuthHandlerName");
-
-        // Tool-cache TTL (wi-017). Default 45 min — below the ~87 min agentic token lifetime.
-        _toolCacheTtl = TimeSpan.FromMinutes(_configuration.GetValue("ToolCache:TtlMinutes", 45));
 
         // Greet when members are added to the conversation
         OnConversationUpdate(ConversationUpdateEvents.MembersAdded, WelcomeMessageAsync);
@@ -294,15 +305,17 @@ public class PlaygroundAgent : AgentApplication
                     }
                 }
 
-                var tools = await GetToolsAsync(turnContext, turnState, authHandlerName);
                 var conversationKey = turnContext.Activity.Conversation?.Id ?? Guid.NewGuid().ToString();
+                var refreshRequested = _orchestrator.ConsumeToolRefreshRequest(conversationKey);
+                var tools = await GetToolsAsync(turnContext, turnState, authHandlerName, forceRefresh: refreshRequested);
                 var displayName = turnContext.Activity.From?.Name;
-// Reactive wi-017 recovery: lets the orchestrator re-enumerate MCP tools with a
-// fresh transport token if a tool call hits a 401 mid-turn.
-Func<CancellationToken, Task<IList<AITool>>> reacquireTools = ct =>
+// Reactive recovery: re-enumerate MCP tools with a fresh transport token if a tool
+// call hits a 401 mid-turn, surfacing whether the token was actually refreshed (Signal 2).
+Func<CancellationToken, Task<ToolReacquireResult>> reacquireTools = async ct =>
 {
     ct.ThrowIfCancellationRequested();
-    return GetToolsAsync(turnContext, turnState, authHandlerName, forceRefresh: true);
+    var fresh = await GetToolsAsync(turnContext, turnState, authHandlerName, forceRefresh: true);
+    return new ToolReacquireResult(fresh, _lastForceRefreshTokenRefreshed);
 };
 await _orchestrator.RunAsync(conversationKey, userText, GetAgentInstructions(displayName), tools, reacquireTools, turnContext, cancellationToken);
             }
@@ -366,25 +379,35 @@ await _orchestrator.RunAsync(conversationKey, userText, GetAgentInstructions(dis
             {
                 string toolCacheKey = GetToolCacheKey(turnState);
                 _agentToolCache.TryGetValue(toolCacheKey, out var cached);
-                var hit = !forceRefresh
-                    && cached is not null
-                    && (DateTime.UtcNow - cached.CreatedAt) < _toolCacheTtl
-                    && cached.Tools.Count > 0;
+                var hit = !forceRefresh && cached is not null && cached.Tools.Count > 0;
                 if (hit)
                 {
                     cached!.LastAccessed = DateTime.UtcNow;
-                    _logger.LogDebug("Tool cache hit ({Count} tools, age {Age:F1} min)",
-                        cached.Tools.Count, (DateTime.UtcNow - cached.CreatedAt).TotalMinutes);
+                    _logger.LogDebug("Tool cache hit ({Count} tools)", cached.Tools.Count);
                     toolList.AddRange(cached.Tools);
                 }
                 else
                 {
-                    // Stale (TTL) or forced (401 recovery): drop any existing entry so we
+                    // Cache miss or forced (401 recovery): drop any existing entry so we
                     // re-enumerate with a fresh transport token.
-                    if (_agentToolCache.TryRemove(toolCacheKey, out var stale))
-                        _logger.LogInformation("Tool cache evicted for re-enumeration (key={Key}, reason={Reason}, age {Age:F1} min).",
-                            toolCacheKey, forceRefresh ? "forceRefresh(401)" : "ttl-expired",
-                            stale is null ? 0 : (DateTime.UtcNow - stale.CreatedAt).TotalMinutes);
+                    if (_agentToolCache.TryRemove(toolCacheKey, out _))
+                        _logger.LogInformation("Tool cache evicted for re-enumeration (key={Key}, reason={Reason}).",
+                            toolCacheKey, forceRefresh ? "forceRefresh(401)" : "cache-miss-or-empty");
+
+                    // Signal 2: did this forced re-enumeration mint a fresh token?
+                    if (forceRefresh)
+                    {
+                        _lastForceRefreshTokenRefreshed = null;
+                        var newExp = TryGetJwtExp(accessToken);
+                        if (newExp is long exp)
+                        {
+                            if (_lastTokenExpByCacheKey.TryGetValue(toolCacheKey, out var prev))
+                                _lastForceRefreshTokenRefreshed = exp > prev;
+                            _lastTokenExpByCacheKey[toolCacheKey] = exp;
+                        }
+                        _logger.LogInformation("MCP401Classification-Signal2 key={Key} tokenRefreshed={Refreshed}.",
+                            toolCacheKey, _lastForceRefreshTokenRefreshed?.ToString() ?? "unknown");
+                    }
 
                     await context.StreamingResponse.QueueInformativeUpdateAsync("Loading tools...");
 
