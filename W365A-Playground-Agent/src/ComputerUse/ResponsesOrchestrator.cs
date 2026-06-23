@@ -17,6 +17,9 @@ using System.Text.Json.Serialization;
 
 namespace Microsoft.W365APlaygroundAgent.ComputerUse;
 
+/// <summary>Result of a forced MCP tool re-enumeration: fresh tools plus whether a new token was minted (Signal 2).</summary>
+public sealed record ToolReacquireResult(IList<AITool> Tools, bool? TokenRefreshed);
+
 /// <summary>
 /// Stateless Responses API orchestrator that manages the agentic tool-call loop for each conversation.
 /// Per-conversation history is held in memory, capped at <see cref="MaxConversations"/> entries (LRU eviction).
@@ -96,6 +99,9 @@ public sealed class ResponsesOrchestrator
 
         /// <summary>Set once after the first attempt to reflect <see cref="W365McpClient"/>, success or fail.</summary>
         public bool W365McpClientResolved { get; set; }
+
+        /// <summary>Set on a direct-client 401; consumed next turn to force MCP re-enumeration.</summary>
+        public bool ToolRefreshRequested { get; set; }
 
         /// <summary>
         /// Session-scoped desktop tool catalog returned by the W365 MCP gateway after a
@@ -289,7 +295,7 @@ public sealed class ResponsesOrchestrator
         string userMessage,
         string instructions,
         IList<AITool> tools,
-        Func<CancellationToken, Task<IList<AITool>>> reacquireTools,
+        Func<CancellationToken, Task<ToolReacquireResult>> reacquireTools,
         ITurnContext turnContext,
         CancellationToken cancellationToken)
     {
@@ -370,6 +376,7 @@ public sealed class ResponsesOrchestrator
         // and rebuild the plumbing, bounded by _max401ReacquiresPerTurn. TryHandleMcp401 has
         // already reset the W365 client latch, so EnsureW365McpClient re-resolves from fresh tools.
         int reacquireCount = 0;
+        bool? lastReacquireTokenRefreshed = null;
         async Task<bool> TryReacquireToolsAsync()
         {
             if (reacquireCount >= _max401ReacquiresPerTurn)
@@ -379,9 +386,11 @@ public sealed class ResponsesOrchestrator
             }
             reacquireCount++;
             _logger.LogInformation("MCP 401 recovery: re-acquiring MCP tools (attempt {N}/{Max}) for conversation {Key}.", reacquireCount, _max401ReacquiresPerTurn, conversationKey);
-            var fresh = await reacquireTools(cancellationToken).ConfigureAwait(false);
-            EnsureW365McpClient(fresh, state);
-            BuildToolPlumbing(fresh);
+            var result = await reacquireTools(cancellationToken).ConfigureAwait(false);
+            lastReacquireTokenRefreshed = result.TokenRefreshed;
+            EnsureW365McpClient(result.Tools, state);
+            BuildToolPlumbing(result.Tools);
+            state.ToolRefreshRequested = false; // same-turn recovery satisfies any deferred request
             return true;
         }
 
@@ -464,6 +473,9 @@ public sealed class ResponsesOrchestrator
                 // Every exit path appends EXACTLY ONE paired function_call_output for this call_id —
                 // including when re-acquisition itself throws (e.g. the token endpoint can't mint a
                 // fresh token) — so the OpenAI Responses API contract is never left with an orphan.
+lastReacquireTokenRefreshed = null; // Signal 2 applies only to reacquires attempted for this tool call
+bool entered401 = outcome == ToolCallOutcome.Mcp401;
+bool recovered = false;
                 for (int retry = 1; outcome == ToolCallOutcome.Mcp401 && retry <= _max401RetriesPerCall; retry++)
                 {
                     var isFinal = retry >= _max401RetriesPerCall;
@@ -473,6 +485,7 @@ public sealed class ResponsesOrchestrator
                             && toolsByName.TryGetValue(name, out var freshFunc))
                         {
                             outcome = await HandleToolCallAsync(state, history, freshFunc, callId, argumentsJson, turnContext, cancellationToken, isFinalAttempt: isFinal);
+                            if (outcome != ToolCallOutcome.Mcp401) recovered = true;
                         }
                         else
                         {
@@ -490,6 +503,21 @@ public sealed class ResponsesOrchestrator
                         history.Add(MakeFunctionCallOutput(callId, "Tool error: MCP authorization expired (401) and token refresh failed this turn."));
                         outcome = ToolCallOutcome.Completed;
                     }
+                }
+
+                // 401 classification: Signal 1 (retry outcome) + Signal 2 (token freshness).
+                if (entered401)
+                {
+                    string label, kind;
+                    if (recovered)
+                    {
+                        label = "recoverable";
+                        kind = lastReacquireTokenRefreshed switch { true => "token-expiry", false => "gateway-session-idle", _ => "unknown" };
+                    }
+                    else if (outcome == ToolCallOutcome.Mcp401) { label = "other-genuine"; kind = "still-401-after-refresh"; }
+                    else { label = "recovery-unavailable"; kind = "reacquire-failed-or-budget"; }
+                    _logger.LogWarning("MCP401Classification conv={Key} path=function-tool tool={Tool} outcome={Label} kind={Kind} (signal1=retry-{Retry}, signal2=tokenRefreshed={Refreshed}).",
+                        conversationKey, name, label, kind, recovered ? "success" : "failed", lastReacquireTokenRefreshed?.ToString() ?? "unknown");
                 }
             }
 
@@ -568,14 +596,15 @@ public sealed class ResponsesOrchestrator
                 if (!isFinalAttempt)
                 {
                     _logger.LogWarning("Tool '{Name}' hit MCP 401 — signaling reacquire+retry.", func.Name);
-                    return ToolCallOutcome.Mcp401;
+                    return ToolCallOutcome.Mcp401; // retry owns the single paired output
                 }
+                // Final attempt still 401 — emit the paired output here and signal a genuine
+                // (unrecovered) 401 so the classifier distinguishes it from a real recovery.
                 _logger.LogWarning(ex, "Tool '{Name}' still 401 after token refresh; giving up this turn.", func.Name);
+                history.Add(MakeFunctionCallOutput(callId, $"Tool error: {ex.Message}"));
+                return ToolCallOutcome.Mcp401;
             }
-            else
-            {
-                _logger.LogWarning(ex, "Tool '{Name}' invocation failed.", func.Name);
-            }
+            _logger.LogWarning(ex, "Tool '{Name}' invocation failed.", func.Name);
             history.Add(MakeFunctionCallOutput(callId, $"Tool error: {ex.Message}"));
             return ToolCallOutcome.Completed;
         }
@@ -1282,8 +1311,25 @@ public sealed class ResponsesOrchestrator
                     caller);
                 state.W365McpClientResolved = false;
                 state.W365McpClient = null;
+                state.ToolRefreshRequested = true;
                 return true;
             }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Consumes a pending deferred tool-refresh request for <paramref name="conversationKey"/>
+    /// (set by a prior direct-client 401). Returns <c>true</c> if the caller should force MCP
+    /// re-enumeration this turn; resets the flag so it fires exactly once.
+    /// </summary>
+    public bool ConsumeToolRefreshRequest(string conversationKey)
+    {
+        if (_conversations.TryGetValue(conversationKey, out var state) && state.ToolRefreshRequested)
+        {
+            state.ToolRefreshRequested = false;
+            _logger.LogInformation("Consuming deferred tool-refresh for {Key} (direct-client 401 recovery) — forcing re-enumeration.", conversationKey);
+            return true;
         }
         return false;
     }
