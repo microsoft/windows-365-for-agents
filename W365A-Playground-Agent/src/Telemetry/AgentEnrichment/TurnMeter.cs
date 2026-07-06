@@ -50,6 +50,9 @@ internal sealed class TurnMeter
     // ---- explicit histogram bucket boundaries (ground rule #4) ---------------------------
     // mcp.toolcall.duration spans fast tool calls (ms) AND Cloud PC StartSession provisioning
     // (up to minutes) — StartSession is just tool_name="W365ComputerUse/StartSession" here.
+    // TO BE OBSERVED: StartSession runs far longer than every other tool; watch whether it skews
+    // this histogram's unfiltered percentiles / bucket distribution in prod. If it does, revisit
+    // (e.g. split StartSession back into its own instrument, or exclude it from this histogram).
     public static readonly double[] BucketsToolCallMs = { 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000, 60000, 120000, 300000 };
     public static readonly double[] BucketsLongMs = { 250, 500, 1000, 2500, 5000, 10000, 30000, 60000, 120000, 300000 };
     public static readonly double[] BucketsTokens = { 100, 500, 1000, 5000, 10000, 50000, 100000, 250000, 500000, 1000000 };
