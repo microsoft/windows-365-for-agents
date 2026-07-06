@@ -122,10 +122,7 @@ app.UseAuthorization();
 // RequireRateLimiting attaches the "messagesGlobal" policy declared above.
 app.MapPost("/api/messages", async (HttpRequest request, HttpResponse response, IAgentHttpAdapter adapter, IAgent agent, CancellationToken cancellationToken) =>
 {
-    await AgentMetrics.InvokeObservedHttpOperation("agent.process_message", async () =>
-    {
-        await adapter.ProcessAsync(request, response, agent, cancellationToken);
-    }).ConfigureAwait(false);
+    await adapter.ProcessAsync(request, response, agent, cancellationToken).ConfigureAwait(false);
 }).RequireRateLimiting("messagesGlobal");
 
 // Health check endpoint for CI/CD pipelines and monitoring

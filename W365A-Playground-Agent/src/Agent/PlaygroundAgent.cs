@@ -3,6 +3,7 @@
 
 using Microsoft.W365APlaygroundAgent.ComputerUse;
 using Microsoft.W365APlaygroundAgent.Telemetry;
+using Microsoft.W365APlaygroundAgent.Telemetry.AgentEnrichment;
 using Microsoft.W365APlaygroundAgent.Throttling;
 using Microsoft.Agents.A365.Runtime.Utils;
 using Microsoft.Agents.A365.Tooling.Extensions.AgentFramework.Services;
@@ -63,6 +64,7 @@ public class PlaygroundAgent : AgentApplication
     private readonly ILogger<PlaygroundAgent> _logger;
     private readonly IMcpToolRegistrationService _toolService;
     private readonly IUserTurnLimiter _turnLimiter;
+    private readonly ITurnScopeAccessor _turnScopes;
 
     // Reusable auto-sign-in handler names for user authorization (configurable via appsettings.json).
     private readonly string? _agenticAuthHandlerName;
@@ -129,13 +131,15 @@ public class PlaygroundAgent : AgentApplication
         IConfiguration configuration,
         IMcpToolRegistrationService toolService,
         ILogger<PlaygroundAgent> logger,
-        IUserTurnLimiter turnLimiter) : base(options)
+        IUserTurnLimiter turnLimiter,
+        ITurnScopeAccessor turnScopes) : base(options)
     {
         _orchestrator = orchestrator;
         _configuration = configuration;
         _logger = logger;
         _toolService = toolService;
         _turnLimiter = turnLimiter;
+        _turnScopes = turnScopes;
 
         // Read auth handler names from configuration (can be empty/null to disable)
         _agenticAuthHandlerName = _configuration.GetValue<string>("AgentApplication:AgenticAuthHandlerName");
@@ -162,19 +166,13 @@ public class PlaygroundAgent : AgentApplication
 
     protected async Task WelcomeMessageAsync(ITurnContext turnContext, ITurnState turnState, CancellationToken cancellationToken)
     {
-        await AgentMetrics.InvokeObservedAgentOperation(
-            "WelcomeMessage",
-            turnContext,
-            async () =>
+        foreach (ChannelAccount member in turnContext.Activity.MembersAdded)
         {
-            foreach (ChannelAccount member in turnContext.Activity.MembersAdded)
+            if (member.Id != turnContext.Activity.Recipient.Id)
             {
-                if (member.Id != turnContext.Activity.Recipient.Id)
-                {
-                    await turnContext.SendActivityAsync(AgentWelcomeMessage);
-                }
+                await turnContext.SendActivityAsync(AgentWelcomeMessage);
             }
-        });
+        }
     }
 
     /// <summary>
@@ -183,26 +181,20 @@ public class PlaygroundAgent : AgentApplication
     /// </summary>
     protected async Task OnInstallationUpdateAsync(ITurnContext turnContext, ITurnState turnState, CancellationToken cancellationToken)
     {
-        await AgentMetrics.InvokeObservedAgentOperation(
-            "InstallationUpdate",
-            turnContext,
-            async () =>
-        {
-            _logger.LogInformation(
-                "InstallationUpdate received — Action: '{Action}', DisplayName: '{Name}', UserId: '{Id}'",
-                turnContext.Activity.Action ?? "(none)",
-                turnContext.Activity.From?.Name ?? "(unknown)",
-                turnContext.Activity.From?.Id ?? "(unknown)");
+        _logger.LogInformation(
+            "InstallationUpdate received — Action: '{Action}', DisplayName: '{Name}', UserId: '{Id}'",
+            turnContext.Activity.Action ?? "(none)",
+            turnContext.Activity.From?.Name ?? "(unknown)",
+            turnContext.Activity.From?.Id ?? "(unknown)");
 
-            if (turnContext.Activity.Action == InstallationUpdateActionTypes.Add)
-            {
-                await turnContext.SendActivityAsync(MessageFactory.Text(AgentHireMessage), cancellationToken);
-            }
-            else if (turnContext.Activity.Action == InstallationUpdateActionTypes.Remove)
-            {
-                await turnContext.SendActivityAsync(MessageFactory.Text(AgentFarewellMessage), cancellationToken);
-            }
-        });
+        if (turnContext.Activity.Action == InstallationUpdateActionTypes.Add)
+        {
+            await turnContext.SendActivityAsync(MessageFactory.Text(AgentHireMessage), cancellationToken);
+        }
+        else if (turnContext.Activity.Action == InstallationUpdateActionTypes.Remove)
+        {
+            await turnContext.SendActivityAsync(MessageFactory.Text(AgentFarewellMessage), cancellationToken);
+        }
     }
 
     /// <summary>Handles every inbound user message: enforces the per-user quota, selects the auth handler, and runs the orchestrator loop.</summary>
@@ -253,14 +245,8 @@ public class PlaygroundAgent : AgentApplication
         // Agentic requests use the agentic auth handler; everything else (Playground, WebChat) uses OBO.
         var authHandlerName = turnContext.IsAgenticRequest() ? _agenticAuthHandlerName : _oboAuthHandlerName;
 
-        await A365OtelWrapper.InvokeObservedAgentOperation(
-            "MessageProcessor",
-            turnContext,
-            turnState,
-            UserAuthorization,
-            authHandlerName ?? string.Empty,
-            _logger,
-            async () =>
+        using var turn = _turnScopes.BeginTurn(turnContext);
+        try
         {
             // Send an immediate acknowledgment — this arrives as a separate message before the LLM response.
             // Each SendActivityAsync call produces a discrete Teams message, enabling the multiple-messages pattern.
@@ -332,7 +318,18 @@ await _orchestrator.RunAsync(conversationKey, userText, GetAgentInstructions(dis
                 }
                 await turnContext.StreamingResponse.EndStreamAsync(cancellationToken).ConfigureAwait(false);
             }
-        });
+            turn.SetSuccess(true);
+        }
+        catch (OperationCanceledException)
+        {
+            turn.SetError("canceled");
+            throw;
+        }
+        catch (Exception ex)
+        {
+            turn.SetError(ex.GetType().Name);
+            throw;
+        }
     }
 
 
@@ -366,6 +363,12 @@ await _orchestrator.RunAsync(conversationKey, userText, GetAgentInstructions(dis
         if (!string.IsNullOrEmpty(accessToken) && string.IsNullOrEmpty(agentId))
         {
             _logger.LogWarning("Access token acquired but agent identity could not be resolved; MCP tools will not be loaded.");
+        }
+
+        // Enrich the current turn with the resolved agent identity (OBO path; agentic path is set at BeginTurn).
+        if (!string.IsNullOrEmpty(agentId))
+        {
+            _turnScopes.CurrentTurn?.SetAgentUser(agentId);
         }
 
         var toolList = new List<AITool>();
