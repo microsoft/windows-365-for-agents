@@ -65,6 +65,12 @@ public sealed class TurnScope : IDisposable
     private string _model = "unknown";
     private bool _disposed;
 
+    /// <summary>
+    /// Invoked at the end of <see cref="Dispose"/> so the accessor can restore the previous ambient
+    /// turn (push/pop). Set by <see cref="TurnScopeAccessor.BeginTurn"/>.
+    /// </summary>
+    internal Action? OnDisposed { get; set; }
+
     internal TurnScope(TurnMeter meter, TurnTags tags, ILogger logger)
     {
         _meter = meter;
@@ -162,6 +168,12 @@ public sealed class TurnScope : IDisposable
         catch
         {
             // Telemetry must never break the business flow (rule #3). Swallow.
+        }
+        finally
+        {
+            // Restore the previous ambient turn (push/pop) so log records emitted after this
+            // turn are not stamped with stale identity, and this scope is not retained.
+            OnDisposed?.Invoke();
         }
     }
 }

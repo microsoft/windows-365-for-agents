@@ -69,7 +69,11 @@ internal sealed class TurnScopeAccessor : ITurnScopeAccessor
     public TurnScope BeginTurn(ITurnContext turnContext)
     {
         var tags = ExtractTags(turnContext);
+        var previous = _current.Value;
         var scope = new TurnScope(_meter, tags, _loggerFactory.CreateLogger("AgentTurn"));
+        // Push/pop: restore the previous ambient on dispose, but only if this scope is still current
+        // (guards against out-of-order disposal on the same async flow).
+        scope.OnDisposed = () => { if (ReferenceEquals(_current.Value, scope)) _current.Value = previous; };
         _current.Value = scope;
         return scope;
     }
