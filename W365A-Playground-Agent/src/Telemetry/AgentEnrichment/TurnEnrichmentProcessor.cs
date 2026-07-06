@@ -27,12 +27,18 @@ internal sealed class TurnEnrichmentProcessor : BaseProcessor<LogRecord>
         if (turn is not null)
         {
             var tags = turn.Tags;
+            var existing = data.Attributes;
 
-            // Last-write-wins: drop any pre-existing identity keys (set upstream or by another
-            // processor) so we don't emit duplicate/conflicting attributes.
-            var enriched = (data.Attributes ?? Array.Empty<KeyValuePair<string, object?>>())
-                .Where(kv => !IdentityKeys.Contains(kv.Key))
-                .ToList();
+            // Last-write-wins: copy non-identity attributes, then append the enriched identity.
+            // Plain loop (no LINQ) — this runs on every log record, so avoid iterator/closure allocs.
+            var enriched = new List<KeyValuePair<string, object?>>((existing?.Count ?? 0) + 5);
+            if (existing is not null)
+            {
+                foreach (var kv in existing)
+                {
+                    if (!IdentityKeys.Contains(kv.Key)) enriched.Add(kv);
+                }
+            }
 
             enriched.Add(new("tenant_id", tags.TenantId));
             enriched.Add(new("agent_user", tags.AgentUser ?? "(none)"));

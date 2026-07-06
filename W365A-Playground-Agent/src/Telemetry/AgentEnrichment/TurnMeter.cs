@@ -11,7 +11,7 @@ namespace Microsoft.W365APlaygroundAgent.Telemetry.AgentEnrichment;
 /// instruments, plus their names, bounded-dimension keys, histogram bucket boundaries, and
 /// thin Record* helpers. App-lifetime singleton.
 ///
-/// Design rules (see .local-knowledge/telemetry-ground-rules.md):
+/// Design rules:
 ///  - Metric dimensions MUST be low-cardinality bounded enums. NEVER put identities
 ///    (tenant_id / agent_user / user_oid / conversation_id / session_id) on a metric —
 ///    those belong to logs/traces only.
@@ -60,7 +60,7 @@ internal sealed class TurnMeter
 
     private readonly Meter _meter;
 
-    // ---- the 10 instruments --------------------------------------------------------------
+    // ---- the 9 instruments ---------------------------------------------------------------
     private readonly Counter<long> _turns;
     private readonly Histogram<int> _llmRoundtrips;
     private readonly Histogram<int> _toolCalls;
