@@ -624,13 +624,13 @@ bool recovered = false;
         object? result;
         var toolStart = System.Diagnostics.Stopwatch.GetTimestamp();
         var (toolServer, toolShortName, toolKind) = ClassifyTool(func.Name);
-        var isStartSession = string.Equals(func.Name, W365StartSessionToolName, StringComparison.OrdinalIgnoreCase);
 
         void RecordToolTelemetry(bool success)
         {
             var elapsedMs = System.Diagnostics.Stopwatch.GetElapsedTime(toolStart).TotalMilliseconds;
+            // StartSession flows through here too (tool_name="W365ComputerUse/StartSession",
+            // tool_type=cua_lifecycle) — its provisioning latency lands in mcp.toolcall.duration.
             _turnScopes.CurrentTurn?.RecordToolCall(toolServer, toolShortName, toolKind, success, elapsedMs);
-            if (isStartSession) _turnScopes.CurrentTurn?.RecordStartSession(elapsedMs, success);
         }
 
         try

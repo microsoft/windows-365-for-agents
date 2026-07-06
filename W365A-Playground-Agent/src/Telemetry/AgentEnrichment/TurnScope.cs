@@ -108,13 +108,6 @@ public sealed class TurnScope : IDisposable
         _meter.RecordToolCall(ToolNameOf(server, tool), kind.ToDimValue(), success, durationMs);
     }
 
-    /// <summary>Records the dedicated StartSession round-trip latency (+ marks the turn as CUA).</summary>
-    public void RecordStartSession(double durationMs, bool success)
-    {
-        _isCua = true;
-        _meter.RecordStartSession(durationMs, success);
-    }
-
     public void SetSuccess(bool success) => _success = success;
 
     public void SetError(string? errorType) { _success = false; _errorType = errorType; }

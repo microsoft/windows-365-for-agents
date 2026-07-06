@@ -33,7 +33,6 @@ internal sealed class TurnMeter
     public const string ToolCallFailuresName = "w365a.turn.toolcall_failures";
     public const string TurnDurationName = "w365a.turn.duration";
     public const string ToolCallDurationName = "w365a.mcp.toolcall.duration";
-    public const string StartSessionDurationName = "w365a.mcp.startsession.duration";
     public const string RoundtripTokensName = "w365a.llm.roundtrip.tokens";
     public const string TurnTokensName = "w365a.turn.tokens";
     public const string TokensName = "w365a.llm.tokens.total";
@@ -49,7 +48,9 @@ internal sealed class TurnMeter
     public const string DimModel = "model";
 
     // ---- explicit histogram bucket boundaries (ground rule #4) ---------------------------
-    public static readonly double[] BucketsShortMs = { 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000 };
+    // mcp.toolcall.duration spans fast tool calls (ms) AND Cloud PC StartSession provisioning
+    // (up to minutes) — StartSession is just tool_name="W365ComputerUse/StartSession" here.
+    public static readonly double[] BucketsToolCallMs = { 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000, 60000, 120000, 300000 };
     public static readonly double[] BucketsLongMs = { 250, 500, 1000, 2500, 5000, 10000, 30000, 60000, 120000, 300000 };
     public static readonly double[] BucketsTokens = { 100, 500, 1000, 5000, 10000, 50000, 100000, 250000, 500000, 1000000 };
     public static readonly double[] BucketsSmallCount = { 1, 2, 3, 5, 8, 13, 21, 34, 55 };
@@ -63,7 +64,6 @@ internal sealed class TurnMeter
     private readonly Histogram<int> _toolCallFailures;
     private readonly Histogram<double> _turnDuration;
     private readonly Histogram<double> _toolCallDuration;
-    private readonly Histogram<double> _startSessionDuration;
     private readonly Histogram<int> _roundtripTokens;
     private readonly Histogram<int> _turnTokens;
     private readonly Counter<long> _tokens;
@@ -77,8 +77,7 @@ internal sealed class TurnMeter
         _toolCalls = _meter.CreateHistogram<int>(ToolCallsName, unit: "{call}", description: "MCP tool calls per turn.");
         _toolCallFailures = _meter.CreateHistogram<int>(ToolCallFailuresName, unit: "{call}", description: "Failed MCP tool calls per turn.");
         _turnDuration = _meter.CreateHistogram<double>(TurnDurationName, unit: "ms", description: "End-to-end turn duration.");
-        _toolCallDuration = _meter.CreateHistogram<double>(ToolCallDurationName, unit: "ms", description: "Per MCP tool-call duration.");
-        _startSessionDuration = _meter.CreateHistogram<double>(StartSessionDurationName, unit: "ms", description: "Cloud PC StartSession round-trip duration.");
+        _toolCallDuration = _meter.CreateHistogram<double>(ToolCallDurationName, unit: "ms", description: "Per MCP tool-call duration (incl. StartSession via tool_name).");
         _roundtripTokens = _meter.CreateHistogram<int>(RoundtripTokensName, unit: "{token}", description: "Tokens per LLM round-trip.");
         _turnTokens = _meter.CreateHistogram<int>(TurnTokensName, unit: "{token}", description: "Tokens per turn.");
         _tokens = _meter.CreateCounter<long>(TokensName, unit: "{token}", description: "Total tokens consumed (for sums).");
@@ -106,7 +105,8 @@ internal sealed class TurnMeter
         _tokens.Add(outputTokens, new TagList { { DimTokenType, "output" }, { DimModel, model } });
     }
 
-    /// <summary>Records a single MCP tool-call duration + outcome (success/failure).</summary>
+    /// <summary>Records a single MCP tool-call duration + outcome (success/failure).
+    /// StartSession is included here as tool_name="W365ComputerUse/StartSession" (bounded).</summary>
     public void RecordToolCall(string toolName, string toolType, bool success, double durationMs)
         => _toolCallDuration.Record(durationMs, new TagList
         {
@@ -114,8 +114,4 @@ internal sealed class TurnMeter
             { DimToolType, toolType },
             { DimOutcome, success ? "success" : "failure" },
         });
-
-    /// <summary>Records a StartSession round-trip duration + outcome.</summary>
-    public void RecordStartSession(double durationMs, bool success)
-        => _startSessionDuration.Record(durationMs, new TagList { { DimOutcome, success ? "success" : "failure" } });
 }

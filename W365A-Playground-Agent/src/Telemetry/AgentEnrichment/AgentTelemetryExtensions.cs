@@ -27,9 +27,8 @@ internal static class AgentTelemetryExtensions
         builder.AddMeter(TurnMeter.MeterName);
 
         builder
-            .AddView(TurnMeter.ToolCallDurationName, Explicit(TurnMeter.BucketsShortMs))
+            .AddView(TurnMeter.ToolCallDurationName, Explicit(TurnMeter.BucketsToolCallMs))
             .AddView(TurnMeter.TurnDurationName, Explicit(TurnMeter.BucketsLongMs))
-            .AddView(TurnMeter.StartSessionDurationName, Explicit(TurnMeter.BucketsLongMs))
             .AddView(TurnMeter.RoundtripTokensName, Explicit(TurnMeter.BucketsTokens))
             .AddView(TurnMeter.TurnTokensName, Explicit(TurnMeter.BucketsTokens))
             .AddView(TurnMeter.LlmRoundtripsName, Explicit(TurnMeter.BucketsSmallCount))
