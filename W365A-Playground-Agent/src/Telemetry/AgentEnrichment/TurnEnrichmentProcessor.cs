@@ -16,7 +16,7 @@ namespace Microsoft.W365APlaygroundAgent.Telemetry.AgentEnrichment;
 /// </summary>
 internal sealed class TurnEnrichmentProcessor : BaseProcessor<LogRecord>
 {
-    private static readonly HashSet<string> IdentityKeys = new(StringComparer.Ordinal)
+    private static readonly HashSet<string> IdentityKeys = new(StringComparer.OrdinalIgnoreCase)
     {
         "tenant_id", "agent_user", "user_oid", "conversation_id", "session_id",
     };
@@ -31,7 +31,7 @@ internal sealed class TurnEnrichmentProcessor : BaseProcessor<LogRecord>
 
             // Last-write-wins: copy non-identity attributes, then append the enriched identity.
             // Plain loop (no LINQ) — this runs on every log record, so avoid iterator/closure allocs.
-            var enriched = new List<KeyValuePair<string, object?>>((existing?.Count ?? 0) + 5);
+            var enriched = new List<KeyValuePair<string, object?>>((existing?.Count ?? 0) + IdentityKeys.Count);
             if (existing is not null)
             {
                 foreach (var kv in existing)

@@ -47,12 +47,19 @@ internal sealed class TurnMeter
     public const string DimTokenType = "token_type";
     public const string DimModel = "model";
 
-    // ---- explicit histogram bucket boundaries (ground rule #4) ---------------------------
-    // mcp.toolcall.duration spans fast tool calls (ms) AND Cloud PC StartSession provisioning
-    // (up to minutes) — StartSession is just tool_name="W365ComputerUse/StartSession" here.
-    // TO BE OBSERVED: StartSession runs far longer than every other tool; watch whether it skews
-    // this histogram's unfiltered percentiles / bucket distribution in prod. If it does, revisit
-    // (e.g. split StartSession back into its own instrument, or exclude it from this histogram).
+    // ---- explicit histogram bucket boundaries ---------------------------------------------
+    // These numeric arrays are DELIBERATE configuration, not magic constants: OpenTelemetry
+    // histograms require explicit bucket boundaries, and the defaults (≤10s) don't fit our ranges.
+    // Each profile is chosen to give useful resolution across the value range it measures.
+    //
+    // toolcall-ms — per MCP tool-call latency; spans fast tool calls (tens of ms) AND Cloud PC
+    //   StartSession provisioning (up to minutes; StartSession is tool_name="W365ComputerUse/StartSession").
+    //   TO BE OBSERVED: StartSession runs far longer than every other tool; watch whether it skews this
+    //   histogram's unfiltered percentiles in prod and, if so, split it out or exclude it.
+    // long-ms      — end-to-end turn latency (sub-second to several minutes for long CUA turns).
+    // tokens       — per-turn / per-round-trip token counts; CUA turns re-send screenshots each
+    //   round-trip, pushing input tokens into the hundreds of thousands, hence the range to 1e6.
+    // small-count  — fan-out / tool-calls per turn; Fibonacci-ish boundaries for fine low-end resolution.
     public static readonly double[] BucketsToolCallMs = { 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000, 60000, 120000, 300000 };
     public static readonly double[] BucketsLongMs = { 250, 500, 1000, 2500, 5000, 10000, 30000, 60000, 120000, 300000 };
     public static readonly double[] BucketsTokens = { 100, 500, 1000, 5000, 10000, 50000, 100000, 250000, 500000, 1000000 };

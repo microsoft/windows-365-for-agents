@@ -164,6 +164,11 @@ public sealed class ResponsesOrchestrator
         W365GetSessionDetailsToolName,
     };
 
+    // Telemetry tool-name parsing (see ClassifyTool): MCP tool names are shaped mcp_<Server>_<Tool>.
+    private const string McpToolNamePrefix = "mcp_";
+    private const string W365ComputerUseServerName = "W365ComputerUse";
+    private const string UnknownServerName = "unknown";
+
     // Curated allow-list of W365 desktop tools we expose to the model as function tools
     // (alongside the native {type:"computer"} tool). The list is what's LEFT after dropping
     // tools the native computer tool can serve directly — see the categories below.
@@ -545,30 +550,59 @@ bool recovered = false;
     }
 
     /// <summary>
-    /// Classifies an MCP function-tool name into (server, shortTool, ToolKind) for telemetry.
-    /// Names are shaped <c>mcp_&lt;Server&gt;_&lt;Tool&gt;</c>; lifecycle tools → cua_lifecycle,
-    /// other W365ComputerUse tools → cua_desktopcontrol, everything else → others.
+    /// Classifies a tool name into (server, shortTool, ToolKind) for telemetry. Handles three shapes:
+    /// W365 lifecycle tools (prefixed <c>mcp_W365ComputerUse_*</c>), W365 supplementary desktop tools
+    /// (exposed as BARE names, e.g. <c>execute_shell_command</c>), and generic <c>mcp_&lt;Server&gt;_&lt;Tool&gt;</c>
+    /// function tools (Mail/Teams/…). W365 Computer-Use tools map to cua_lifecycle/cua_desktopcontrol; the
+    /// rest to others.
     /// </summary>
-    private static (string Server, string Tool, ToolKind Kind) ClassifyTool(string mcpName)
+    private static (string Server, string Tool, ToolKind Kind) ClassifyTool(string toolName)
     {
-        string server = "unknown", tool = mcpName;
-        if (mcpName.StartsWith("mcp_", StringComparison.Ordinal))
+        // W365 supplementary desktop tools are exposed as bare names (no mcp_<Server>_ prefix).
+        if (W365SupplementaryDesktopTools.Contains(toolName))
         {
-            var rest = mcpName[4..];
-            var us = rest.IndexOf('_');
-            if (us > 0)
-            {
-                server = rest[..us];
-                tool = rest[(us + 1)..];
-            }
+            return (W365ComputerUseServerName, toolName, ToolKind.CuaDesktopControl);
         }
 
-        ToolKind kind;
-        if (W365LifecycleToolNames.Contains(mcpName)) kind = ToolKind.CuaLifecycle;
-        else if (string.Equals(server, "W365ComputerUse", StringComparison.OrdinalIgnoreCase)) kind = ToolKind.CuaDesktopControl;
-        else kind = ToolKind.Others;
+        var isMcpName = TrySplitMcpToolName(toolName, out var server, out var tool);
 
-        return (server, tool, kind);
+        // Lifecycle tools are prefixed (mcp_W365ComputerUse_StartSession, …).
+        if (W365LifecycleToolNames.Contains(toolName))
+        {
+            return (W365ComputerUseServerName, isMcpName ? tool : toolName, ToolKind.CuaLifecycle);
+        }
+
+        if (isMcpName)
+        {
+            var kind = string.Equals(server, W365ComputerUseServerName, StringComparison.OrdinalIgnoreCase)
+                ? ToolKind.CuaDesktopControl
+                : ToolKind.Others;
+            return (server, tool, kind);
+        }
+
+        return (UnknownServerName, toolName, ToolKind.Others);
+    }
+
+    /// <summary>Splits an <c>mcp_&lt;Server&gt;_&lt;Tool&gt;</c> tool name into its server and tool parts.</summary>
+    private static bool TrySplitMcpToolName(string toolName, out string server, out string tool)
+    {
+        server = UnknownServerName;
+        tool = toolName;
+        if (!toolName.StartsWith(McpToolNamePrefix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var rest = toolName[McpToolNamePrefix.Length..];
+        var separator = rest.IndexOf('_');
+        if (separator <= 0)
+        {
+            return false;
+        }
+
+        server = rest[..separator];
+        tool = rest[(separator + 1)..];
+        return true;
     }
 
     /// <summary>
@@ -793,12 +827,12 @@ bool recovered = false;
                     finalScreenshotB64 = ss?.Base64;
                     finalScreenshotMime = ss?.MimeType ?? "image/png";
                     lastActionWasScreenshot = true;
-                    _turnScopes.CurrentTurn?.RecordToolCall("W365ComputerUse", "take_screenshot", ToolKind.CuaDesktopControl,
+                    _turnScopes.CurrentTurn?.RecordToolCall(W365ComputerUseServerName, "take_screenshot", ToolKind.CuaDesktopControl,
                         success: true, System.Diagnostics.Stopwatch.GetElapsedTime(ssStart).TotalMilliseconds);
                 }
                 catch (Exception ex)
                 {
-                    _turnScopes.CurrentTurn?.RecordToolCall("W365ComputerUse", "take_screenshot", ToolKind.CuaDesktopControl,
+                    _turnScopes.CurrentTurn?.RecordToolCall(W365ComputerUseServerName, "take_screenshot", ToolKind.CuaDesktopControl,
                         success: false, System.Diagnostics.Stopwatch.GetElapsedTime(ssStart).TotalMilliseconds);
                     _logger.LogWarning(ex,
                         "computer_call screenshot action failed (callId={CallId}); will pair with placeholder.", callId);
@@ -832,12 +866,12 @@ bool recovered = false;
                 await state.W365McpClient.CallToolAsync(toolName, args, cancellationToken: cancellationToken)
                     .ConfigureAwait(false);
                 lastActionWasScreenshot = false;
-                _turnScopes.CurrentTurn?.RecordToolCall("W365ComputerUse", toolName, ToolKind.CuaDesktopControl,
+                _turnScopes.CurrentTurn?.RecordToolCall(W365ComputerUseServerName, toolName, ToolKind.CuaDesktopControl,
                     success: true, System.Diagnostics.Stopwatch.GetElapsedTime(actStart).TotalMilliseconds);
             }
             catch (Exception ex)
             {
-                _turnScopes.CurrentTurn?.RecordToolCall("W365ComputerUse", toolName, ToolKind.CuaDesktopControl,
+                _turnScopes.CurrentTurn?.RecordToolCall(W365ComputerUseServerName, toolName, ToolKind.CuaDesktopControl,
                     success: false, System.Diagnostics.Stopwatch.GetElapsedTime(actStart).TotalMilliseconds);
                 TryHandleMcp401(ex, state);
                 _logger.LogWarning(ex,

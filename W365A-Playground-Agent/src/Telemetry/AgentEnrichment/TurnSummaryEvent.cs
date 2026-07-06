@@ -44,6 +44,11 @@ internal static partial class TurnSummaryEvent
 {
     public const string EventName = "AgentTurnSummary";
 
+    // Stable numeric EventId so Kusto queries / alerts can key on it across versions. The value is
+    // arbitrary (app-chosen), but MUST stay fixed once shipped — do not renumber. Kept in the app's
+    // own 6000-series to avoid collision with framework/library event ids.
+    public const int EventId = 6001;
+
     public static void Emit(ILogger logger, TurnSummary s) => LogTurnSummary(
         logger,
         s.TenantId, s.AgentUser, s.UserOid, s.ConversationId, s.SessionId, s.SessionCount,
@@ -52,7 +57,7 @@ internal static partial class TurnSummaryEvent
         s.DurationMs, s.Success, s.ErrorType);
 
     [LoggerMessage(
-        EventId = 6001,
+        EventId = EventId,
         EventName = EventName,
         Level = LogLevel.Information,
         Message = "AgentTurnSummary tenant={tenant_id} agentUser={agent_user} oid={user_oid} conv={conversation_id} " +
