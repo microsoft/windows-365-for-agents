@@ -26,17 +26,17 @@ internal sealed class TurnMeter
     public const string MeterName = "W365APlaygroundAgent";
     public const string MeterVersion = "1.0.0";
 
-    // ---- instrument names (all w365a.*) --------------------------------------------------
-    public const string TurnsName = "w365a.agent.turns";
-    public const string LlmRoundtripsName = "w365a.cua.llm_roundtrips";
-    public const string ToolCallsName = "w365a.cua.toolcalls";
-    public const string ToolCallFailuresName = "w365a.cua.toolcall_failures";
-    public const string TurnDurationName = "w365a.cua.turn.duration";
+    // ---- instrument names (subject-based: turn.* / mcp.* / llm.*; cua is a dimension) ----
+    public const string TurnsName = "w365a.turn.count";
+    public const string LlmRoundtripsName = "w365a.turn.llm_roundtrips";
+    public const string ToolCallsName = "w365a.turn.toolcalls";
+    public const string ToolCallFailuresName = "w365a.turn.toolcall_failures";
+    public const string TurnDurationName = "w365a.turn.duration";
     public const string ToolCallDurationName = "w365a.mcp.toolcall.duration";
-    public const string StartSessionDurationName = "w365a.cua.startsession.duration";
+    public const string StartSessionDurationName = "w365a.mcp.startsession.duration";
     public const string RoundtripTokensName = "w365a.llm.roundtrip.tokens";
-    public const string TurnTokensName = "w365a.cua.turn.tokens";
-    public const string TokensName = "w365a.llm.tokens";
+    public const string TurnTokensName = "w365a.turn.tokens";
+    public const string TokensName = "w365a.llm.tokens.total";
 
     // ---- bounded dimension keys ----------------------------------------------------------
     public const string DimIsCua = "is_cua";
