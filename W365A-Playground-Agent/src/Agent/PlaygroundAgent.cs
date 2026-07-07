@@ -380,7 +380,7 @@ await _orchestrator.RunAsync(conversationKey, userText, GetAgentInstructions(dis
         {
             try
             {
-                string toolCacheKey = GetToolCacheKey(turnState);
+                string toolCacheKey = GetToolCacheKey(turnState, agentId);
                 _agentToolCache.TryGetValue(toolCacheKey, out var cached);
                 var hit = !forceRefresh && cached is not null && cached.Tools.Count > 0;
                 if (hit)
@@ -461,15 +461,21 @@ await _orchestrator.RunAsync(conversationKey, userText, GetAgentInstructions(dis
         return toolList;
     }
 
-    private string GetToolCacheKey(ITurnState turnState)
+    // The tool cache key is per (human caller, agent) — BOTH parts are required:
+    //  - userToolCacheKey: a stable per-caller GUID kept in User state (UserState is keyed by
+    //    channel + caller). Isolates OBO tokens so one caller's tools are never reused for another.
+    //  - agentId: the resolved agent identity. Cached A365 MCP tools carry an agent-specific bearer
+    //    token baked into their HTTP transport at enumeration time; without agentId in the key, a
+    //    single caller addressing multiple agents would collapse onto one entry and run tool calls
+    //    (e.g. Teams SendMessageToUser) under whichever agent loaded first — i.e. send as the wrong agent.
+    private string GetToolCacheKey(ITurnState turnState, string agentId)
     {
         string userToolCacheKey = turnState.User.GetValue<string?>("user.toolCacheKey", () => null) ?? "";
         if (string.IsNullOrEmpty(userToolCacheKey))
         {
             userToolCacheKey = Guid.NewGuid().ToString();
             turnState.User.SetValue("user.toolCacheKey", userToolCacheKey);
-            return userToolCacheKey;
         }
-        return userToolCacheKey;
+        return $"{userToolCacheKey}:{agentId}";
     }
 }
