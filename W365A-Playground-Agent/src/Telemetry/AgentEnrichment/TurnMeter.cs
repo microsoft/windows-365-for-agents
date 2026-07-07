@@ -16,13 +16,10 @@ namespace Microsoft.W365APlaygroundAgent.Telemetry.AgentEnrichment;
 ///    (tenant_id / agent_user / user_oid / conversation_id / session_id) on a metric —
 ///    those belong to logs/traces only.
 ///  - Names are custom under "w365a.*" (no experimental gen_ai.*).
-///
-/// NOTE: file/type name "TurnMeter" is provisional — final name to be decided at code review.
 /// </summary>
 internal sealed class TurnMeter
 {
-    // Meter source name — reused from the previous AgentMetrics implementation so existing
-    // OTel registration keeps working during migration.
+    // Meter source name (must match the AddMeter(...) registration in OpenTelemetryExtensions).
     public const string MeterName = "W365APlaygroundAgent";
     public const string MeterVersion = "1.0.0";
 

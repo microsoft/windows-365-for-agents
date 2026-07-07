@@ -164,7 +164,7 @@ public sealed class ResponsesOrchestrator
         W365GetSessionDetailsToolName,
     };
 
-    // Telemetry tool-name parsing (see ClassifyTool): MCP tool names are shaped mcp_<Server>_<Tool>.
+    // MCP tool names are shaped mcp_<Server>_<Tool> (parsed in ClassifyTool).
     private const string McpToolNamePrefix = "mcp_";
     private const string W365ComputerUseServerName = "W365ComputerUse";
     private const string UnknownServerName = "unknown";
@@ -421,7 +421,6 @@ public sealed class ResponsesOrchestrator
 
             var response = await CallModelAsync(history, instructions, toolDefs, cancellationToken);
 
-            // Telemetry: one LLM round-trip completed — record its token usage (COGS + fan-out).
             if (response.Usage is { } usage)
             {
                 _turnScopes.CurrentTurn?.RecordModelRoundtrip(
@@ -705,7 +704,6 @@ bool recovered = false;
         // multi-slot session set based on which lifecycle tool just ran.
         await UpdateW365SessionFromResult(state, func.Name, args, result, cancellationToken);
 
-        // Telemetry: reflect the conversation's current W365 session selection/count for this turn.
         _turnScopes.CurrentTurn?.SetSessionId(state.W365SessionId);
         _turnScopes.CurrentTurn?.SetSessionCount(state.W365SessionIds.Count);
 
@@ -780,7 +778,6 @@ bool recovered = false;
             return;
         }
 
-        // Telemetry: reflect the active W365 session this computer_call runs against.
         _turnScopes.CurrentTurn?.SetSessionId(state.W365SessionId);
         _turnScopes.CurrentTurn?.SetSessionCount(state.W365SessionIds.Count);
 
