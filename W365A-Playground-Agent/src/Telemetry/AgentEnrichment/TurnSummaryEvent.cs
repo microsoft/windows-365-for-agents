@@ -12,6 +12,7 @@ namespace Microsoft.W365APlaygroundAgent.Telemetry.AgentEnrichment;
 internal readonly record struct TurnSummary(
     string TenantId,
     string AgentUser,
+    string AgentInstanceId,
     string UserOid,
     string ConversationId,
     string SessionId,
@@ -51,7 +52,7 @@ internal static partial class TurnSummaryEvent
 
     public static void Emit(ILogger logger, TurnSummary s) => LogTurnSummary(
         logger,
-        s.TenantId, s.AgentUser, s.UserOid, s.ConversationId, s.SessionId, s.SessionCount,
+        s.TenantId, s.AgentUser, s.AgentInstanceId, s.UserOid, s.ConversationId, s.SessionId, s.SessionCount,
         s.Channel, s.IsCua, s.Model, s.LlmRoundtrips, s.McpToolCalls, s.McpToolCallFailures,
         s.InputTokens, s.OutputTokens, s.TotalTokens, s.CachedTokens, s.ReasoningTokens,
         s.DurationMs, s.Success, s.ErrorType);
@@ -60,7 +61,7 @@ internal static partial class TurnSummaryEvent
         EventId = EventId,
         EventName = EventName,
         Level = LogLevel.Information,
-        Message = "AgentTurnSummary tenant={tenant_id} agentUser={agent_user} oid={user_oid} conv={conversation_id} " +
+        Message = "AgentTurnSummary tenant={tenant_id} agentUser={agent_user} agentInstance={agent_instance_id} oid={user_oid} conv={conversation_id} " +
                   "session={session_id} sessionCount={session_count} channel={channel} isCua={is_cua} model={model} " +
                   "roundtrips={llm_roundtrips} toolcalls={mcp_toolcalls} toolcallFailures={mcp_toolcall_failures} " +
                   "inTok={input_tokens} outTok={output_tokens} totTok={total_tokens} cachedTok={cached_tokens} " +
@@ -69,6 +70,7 @@ internal static partial class TurnSummaryEvent
         ILogger logger,
         string tenant_id,
         string agent_user,
+        string agent_instance_id,
         string user_oid,
         string conversation_id,
         string session_id,

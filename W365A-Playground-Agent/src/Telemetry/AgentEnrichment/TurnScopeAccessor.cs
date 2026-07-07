@@ -16,6 +16,7 @@ internal sealed class TurnTags
     // Identity (logs/event only).
     public string TenantId { get; set; } = "unknown";
     public string? AgentUser { get; set; }
+    public string? AgentInstanceId { get; set; }
     public string? UserOid { get; set; }
     public string ConversationId { get; set; } = "unknown";
     public string? SessionId { get; set; }
@@ -42,11 +43,9 @@ public interface ITurnScopeAccessor
 /// </summary>
 internal sealed class TurnScopeAccessor : ITurnScopeAccessor
 {
-    // Claim spellings (short + WS-Fed URI) for tenant and user object id.
+    // Claim spellings (short + WS-Fed URI) for tenant id.
     private const string TidClaimShort = "tid";
     private const string TidClaimUri = "http://schemas.microsoft.com/identity/claims/tenantid";
-    private const string OidClaimShort = "oid";
-    private const string OidClaimUri = "http://schemas.microsoft.com/identity/claims/objectidentifier";
 
     private static readonly AsyncLocal<TurnScope?> _current = new();
 
@@ -110,19 +109,29 @@ internal sealed class TurnScopeAccessor : ITurnScopeAccessor
                 isAgentic, identity is not null, tags.Channel);
         }
 
-        // ---- agent_user: agentic instance id up front; OBO path set later via SetAgentUser (Q5) ----
-        if (isAgentic)
-        {
-            var agenticId = activity?.GetAgenticInstanceId();
-            if (!string.IsNullOrEmpty(agenticId)) tags.AgentUser = agenticId;
-        }
-
-        // ---- user_oid: best-effort, both claim spellings, event-only (Q6) ----
-        tags.UserOid = FindClaim(identity, OidClaimShort, OidClaimUri);
+        // ---- user_oid: the HUMAN operator, from Activity.From (NOT the token oid, which is the
+        //      messaging-bot service principal). Event-only. ----
+        tags.UserOid = ResolveDirectoryObjectId(activity?.From?.AadObjectId, activity?.From?.Id);
         if (string.IsNullOrEmpty(tags.UserOid))
         {
-            _logger.LogWarning("[AgentTurn] user_oid could not be resolved (isAgentic={IsAgentic}, hasIdentity={HasIdentity}).",
-                isAgentic, identity is not null);
+            _logger.LogWarning("[AgentTurn] user_oid (human) unresolved from Activity.From (isAgentic={IsAgentic}, channel={Channel}).",
+                isAgentic, tags.Channel);
+        }
+
+        // ---- agent_user + agent_instance_id (agentic only) ----
+        //  agent_user        = the agent's digital-worker USER account (Activity.Recipient) — a named
+        //                      Entra user, 1:1 with the instance, and the Cloud PC entitlement holder.
+        //  agent_instance_id = the runtime agent instance (secondary, for A365 drill-down).
+        //  OBO/non-agentic agent identity is set later via SetAgentUser (ResolveAgentIdentity).
+        if (isAgentic)
+        {
+            tags.AgentUser = ResolveDirectoryObjectId(activity?.Recipient?.AadObjectId, activity?.Recipient?.Id);
+            tags.AgentInstanceId = activity?.GetAgenticInstanceId();
+            if (string.IsNullOrEmpty(tags.AgentUser))
+            {
+                _logger.LogWarning("[AgentTurn] agent_user (digital worker) unresolved from Activity.Recipient (channel={Channel}).",
+                    tags.Channel);
+            }
         }
 
         return tags;
@@ -130,6 +139,19 @@ internal sealed class TurnScopeAccessor : ITurnScopeAccessor
 
     private static string? FindClaim(ClaimsIdentity? identity, string shortType, string uriType)
         => identity?.FindFirst(shortType)?.Value ?? identity?.FindFirst(uriType)?.Value;
+
+    // Resolve a directory object id (GUID) from a ChannelAccount: prefer AadObjectId; else strip the
+    // channel "8:orgid:" prefix off Id and accept only if it parses as a GUID (never stamp a
+    // channel-scoped non-directory id as identity).
+    private static string? ResolveDirectoryObjectId(string? aadObjectId, string? channelAccountId)
+    {
+        if (!string.IsNullOrEmpty(aadObjectId)) return aadObjectId;
+        if (string.IsNullOrEmpty(channelAccountId)) return null;
+        const string OrgIdPrefix = "8:orgid:";
+        var id = channelAccountId.StartsWith(OrgIdPrefix, StringComparison.OrdinalIgnoreCase)
+            ? channelAccountId[OrgIdPrefix.Length..] : channelAccountId;
+        return Guid.TryParse(id, out _) ? id : null;
+    }
 
     private static string? FirstNonEmpty(params string?[] values)
     {

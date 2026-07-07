@@ -18,7 +18,7 @@ internal sealed class TurnEnrichmentProcessor : BaseProcessor<LogRecord>
 {
     private static readonly HashSet<string> IdentityKeys = new(StringComparer.OrdinalIgnoreCase)
     {
-        "tenant_id", "agent_user", "user_oid", "conversation_id", "session_id",
+        "tenant_id", "agent_user", "agent_instance_id", "user_oid", "conversation_id", "session_id",
     };
 
     public override void OnEnd(LogRecord data)
@@ -42,6 +42,7 @@ internal sealed class TurnEnrichmentProcessor : BaseProcessor<LogRecord>
 
             enriched.Add(new("tenant_id", tags.TenantId));
             enriched.Add(new("agent_user", tags.AgentUser ?? "(none)"));
+            enriched.Add(new("agent_instance_id", tags.AgentInstanceId ?? "(none)"));
             enriched.Add(new("user_oid", tags.UserOid ?? "(none)"));
             enriched.Add(new("conversation_id", tags.ConversationId));
             enriched.Add(new("session_id", tags.SessionId ?? "(none)"));

@@ -365,8 +365,8 @@ await _orchestrator.RunAsync(conversationKey, userText, GetAgentInstructions(dis
             _logger.LogWarning("Access token acquired but agent identity could not be resolved; MCP tools will not be loaded.");
         }
 
-        // Enrich the current turn with the resolved agent identity (OBO path; agentic path is set at BeginTurn).
-        if (!string.IsNullOrEmpty(agentId))
+        // OBO/non-agentic agent identity. (Agentic sets agent_user + agent_instance_id at BeginTurn.)
+        if (!context.IsAgenticRequest() && !string.IsNullOrEmpty(agentId))
         {
             _turnScopes.CurrentTurn?.SetAgentUser(agentId);
         }
