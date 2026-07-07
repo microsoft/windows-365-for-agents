@@ -8,7 +8,7 @@ namespace Microsoft.W365APlaygroundAgent.Telemetry.AgentEnrichment;
 
 /// <summary>
 /// PIPELINE stage: an OpenTelemetry log processor that stamps the ambient turn's identity
-/// (tenant_id / agent_user / user_oid / conversation_id / session_id) onto every
+/// (tenant_id / agent_user / agent_instance_id / user_oid / conversation_id / session_id) onto every
 /// <see cref="LogRecord"/> emitted during a turn — so business code never has to attach identity
 /// to its log calls (rule #3, Q9a). Identities are logs/trace-only, never metric dimensions.
 ///
