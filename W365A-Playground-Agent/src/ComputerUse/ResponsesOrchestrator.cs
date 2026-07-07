@@ -4,6 +4,7 @@
 using Microsoft.Agents.Builder;
 using Microsoft.Agents.Core.Models;
 using Microsoft.Extensions.AI;
+using Microsoft.W365APlaygroundAgent.Telemetry.AgentEnrichment;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
 using System.Collections.Concurrent;
@@ -31,6 +32,7 @@ public sealed class ResponsesOrchestrator
 {
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<ResponsesOrchestrator> _logger;
+    private readonly ITurnScopeAccessor _turnScopes;
     private readonly string _responsesUrl;
     private readonly string _model;
     private readonly string _apiKey;
@@ -162,6 +164,11 @@ public sealed class ResponsesOrchestrator
         W365GetSessionDetailsToolName,
     };
 
+    // MCP tool names are shaped mcp_<Server>_<Tool> (parsed in ClassifyTool).
+    private const string McpToolNamePrefix = "mcp_";
+    private const string W365ComputerUseServerName = "W365ComputerUse";
+    private const string UnknownServerName = "unknown";
+
     // Curated allow-list of W365 desktop tools we expose to the model as function tools
     // (alongside the native {type:"computer"} tool). The list is what's LEFT after dropping
     // tools the native computer tool can serve directly — see the categories below.
@@ -264,10 +271,12 @@ public sealed class ResponsesOrchestrator
     public ResponsesOrchestrator(
         IHttpClientFactory httpClientFactory,
         IConfiguration configuration,
-        ILogger<ResponsesOrchestrator> logger)
+        ILogger<ResponsesOrchestrator> logger,
+        ITurnScopeAccessor turnScopes)
     {
         _httpClientFactory = httpClientFactory;
         _logger = logger;
+        _turnScopes = turnScopes;
 
         var endpoint = (configuration["AIServices:AzureOpenAI:Endpoint"]
             ?? throw new InvalidOperationException("AIServices:AzureOpenAI:Endpoint is required.")).TrimEnd('/');
@@ -412,6 +421,16 @@ public sealed class ResponsesOrchestrator
 
             var response = await CallModelAsync(history, instructions, toolDefs, cancellationToken);
 
+            if (response.Usage is { } usage)
+            {
+                _turnScopes.CurrentTurn?.RecordModelRoundtrip(
+                    usage.InputTokens,
+                    usage.OutputTokens,
+                    response.Model,
+                    usage.InputTokensDetails?.CachedTokens ?? 0,
+                    usage.OutputTokensDetails?.ReasoningTokens ?? 0);
+            }
+
             // Append all output items to history so they appear as context in the next call
             foreach (var item in response.Output)
                 history.Add(item);
@@ -530,6 +549,62 @@ bool recovered = false;
     }
 
     /// <summary>
+    /// Classifies a tool name into (server, shortTool, ToolKind) for telemetry. Handles three shapes:
+    /// W365 lifecycle tools (prefixed <c>mcp_W365ComputerUse_*</c>), W365 supplementary desktop tools
+    /// (exposed as BARE names, e.g. <c>execute_shell_command</c>), and generic <c>mcp_&lt;Server&gt;_&lt;Tool&gt;</c>
+    /// function tools (Mail/Teams/…). W365 Computer-Use tools map to cua_lifecycle/cua_desktopcontrol; the
+    /// rest to others.
+    /// </summary>
+    private static (string Server, string Tool, ToolKind Kind) ClassifyTool(string toolName)
+    {
+        // W365 supplementary desktop tools are exposed as bare names (no mcp_<Server>_ prefix).
+        if (W365SupplementaryDesktopTools.Contains(toolName))
+        {
+            return (W365ComputerUseServerName, toolName, ToolKind.CuaDesktopControl);
+        }
+
+        var isMcpName = TrySplitMcpToolName(toolName, out var server, out var tool);
+
+        // Lifecycle tools are prefixed (mcp_W365ComputerUse_StartSession, …).
+        if (W365LifecycleToolNames.Contains(toolName))
+        {
+            return (W365ComputerUseServerName, isMcpName ? tool : toolName, ToolKind.CuaLifecycle);
+        }
+
+        if (isMcpName)
+        {
+            var kind = string.Equals(server, W365ComputerUseServerName, StringComparison.OrdinalIgnoreCase)
+                ? ToolKind.CuaDesktopControl
+                : ToolKind.Others;
+            return (server, tool, kind);
+        }
+
+        return (UnknownServerName, toolName, ToolKind.Others);
+    }
+
+    /// <summary>Splits an <c>mcp_&lt;Server&gt;_&lt;Tool&gt;</c> tool name into its server and tool parts.</summary>
+    private static bool TrySplitMcpToolName(string toolName, out string server, out string tool)
+    {
+        server = UnknownServerName;
+        tool = toolName;
+        if (!toolName.StartsWith(McpToolNamePrefix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var rest = toolName[McpToolNamePrefix.Length..];
+        var separator = rest.IndexOf('_');
+        if (separator <= 0)
+        {
+            return false;
+        }
+
+        server = rest[..separator];
+        tool = rest[(separator + 1)..];
+        return true;
+    }
+
+    /// <summary>
     /// Invokes a tool and handles its result. If the result contains embedded image data — which any
     /// W365 computer-use tool can return as a screenshot — the image is sent directly to the user via
     /// Teams and injected as <c>input_image</c> for the next model call. Text results are appended
@@ -580,6 +655,17 @@ bool recovered = false;
         }
 
         object? result;
+        var toolStart = System.Diagnostics.Stopwatch.GetTimestamp();
+        var (toolServer, toolShortName, toolKind) = ClassifyTool(func.Name);
+
+        void RecordToolTelemetry(bool success)
+        {
+            var elapsedMs = System.Diagnostics.Stopwatch.GetElapsedTime(toolStart).TotalMilliseconds;
+            // StartSession flows through here too (tool_name="W365ComputerUse/StartSession",
+            // tool_type=cua_lifecycle) — its provisioning latency lands in mcp.toolcall.duration.
+            _turnScopes.CurrentTurn?.RecordToolCall(toolServer, toolShortName, toolKind, success, elapsedMs);
+        }
+
         try
         {
             result = await func.InvokeAsync(new AIFunctionArguments(args), cancellationToken);
@@ -595,23 +681,31 @@ bool recovered = false;
             {
                 if (!isFinalAttempt)
                 {
+                    // Non-final 401: a retry attempt will own the telemetry for this logical call.
                     _logger.LogWarning("Tool '{Name}' hit MCP 401 — signaling reacquire+retry.", func.Name);
                     return ToolCallOutcome.Mcp401; // retry owns the single paired output
                 }
                 // Final attempt still 401 — emit the paired output here and signal a genuine
                 // (unrecovered) 401 so the classifier distinguishes it from a real recovery.
                 _logger.LogWarning(ex, "Tool '{Name}' still 401 after token refresh; giving up this turn.", func.Name);
+                RecordToolTelemetry(success: false);
                 history.Add(MakeFunctionCallOutput(callId, $"Tool error: {ex.Message}"));
                 return ToolCallOutcome.Mcp401;
             }
             _logger.LogWarning(ex, "Tool '{Name}' invocation failed.", func.Name);
+            RecordToolTelemetry(success: false);
             history.Add(MakeFunctionCallOutput(callId, $"Tool error: {ex.Message}"));
             return ToolCallOutcome.Completed;
         }
 
+        RecordToolTelemetry(success: true);
+
         // W365 lifecycle post-processing: track/remove sessions in the conversation's
         // multi-slot session set based on which lifecycle tool just ran.
         await UpdateW365SessionFromResult(state, func.Name, args, result, cancellationToken);
+
+        _turnScopes.CurrentTurn?.SetSessionId(state.W365SessionId);
+        _turnScopes.CurrentTurn?.SetSessionCount(state.W365SessionIds.Count);
 
         // All W365 computer-use tools can return an embedded screenshot — check every result.
         var imageResult = ExtractBase64FromResult(result);
@@ -684,6 +778,9 @@ bool recovered = false;
             return;
         }
 
+        _turnScopes.CurrentTurn?.SetSessionId(state.W365SessionId);
+        _turnScopes.CurrentTurn?.SetSessionCount(state.W365SessionIds.Count);
+
         // Collect actions: prefer plural actions[], fall back to singular action. (Both shapes
         // are seen across OpenAI model variants.) Each entry is a JsonElement we'll dispatch
         // through MapActionToMcpTool serially.
@@ -720,15 +817,20 @@ bool recovered = false;
             // paired computer_call_output below.
             if (string.Equals(actionType, "screenshot", StringComparison.OrdinalIgnoreCase))
             {
+                var ssStart = System.Diagnostics.Stopwatch.GetTimestamp();
                 try
                 {
                     var ss = await CaptureScreenshotAsync(state, cancellationToken).ConfigureAwait(false);
                     finalScreenshotB64 = ss?.Base64;
                     finalScreenshotMime = ss?.MimeType ?? "image/png";
                     lastActionWasScreenshot = true;
+                    _turnScopes.CurrentTurn?.RecordToolCall(W365ComputerUseServerName, "take_screenshot", ToolKind.CuaDesktopControl,
+                        success: true, System.Diagnostics.Stopwatch.GetElapsedTime(ssStart).TotalMilliseconds);
                 }
                 catch (Exception ex)
                 {
+                    _turnScopes.CurrentTurn?.RecordToolCall(W365ComputerUseServerName, "take_screenshot", ToolKind.CuaDesktopControl,
+                        success: false, System.Diagnostics.Stopwatch.GetElapsedTime(ssStart).TotalMilliseconds);
                     _logger.LogWarning(ex,
                         "computer_call screenshot action failed (callId={CallId}); will pair with placeholder.", callId);
                 }
@@ -752,6 +854,7 @@ bool recovered = false;
             if (mapped is null) { lastActionWasScreenshot = false; continue; }
 
             var (toolName, args) = mapped.Value;
+            var actStart = System.Diagnostics.Stopwatch.GetTimestamp();
             try
             {
                 _logger.LogInformation(
@@ -760,9 +863,13 @@ bool recovered = false;
                 await state.W365McpClient.CallToolAsync(toolName, args, cancellationToken: cancellationToken)
                     .ConfigureAwait(false);
                 lastActionWasScreenshot = false;
+                _turnScopes.CurrentTurn?.RecordToolCall(W365ComputerUseServerName, toolName, ToolKind.CuaDesktopControl,
+                    success: true, System.Diagnostics.Stopwatch.GetElapsedTime(actStart).TotalMilliseconds);
             }
             catch (Exception ex)
             {
+                _turnScopes.CurrentTurn?.RecordToolCall(W365ComputerUseServerName, toolName, ToolKind.CuaDesktopControl,
+                    success: false, System.Diagnostics.Stopwatch.GetElapsedTime(actStart).TotalMilliseconds);
                 TryHandleMcp401(ex, state);
                 _logger.LogWarning(ex,
                     "computer_call MCP dispatch failed: action='{ActionType}' tool='{Tool}' (callId={CallId}).",
@@ -1765,7 +1872,23 @@ bool recovered = false;
     /// <summary>The subset of the OpenAI Responses API response that we deserialise. Other fields are ignored.</summary>
     private sealed record ResponsesResponse(
         [property: JsonPropertyName("id")] string Id,
-        [property: JsonPropertyName("output")] List<JsonElement> Output);
+        [property: JsonPropertyName("output")] List<JsonElement> Output,
+        [property: JsonPropertyName("model")] string? Model = null,
+        [property: JsonPropertyName("usage")] ResponsesUsage? Usage = null);
+
+    /// <summary>Token usage reported by the Responses API on each (non-streaming) call.</summary>
+    private sealed record ResponsesUsage(
+        [property: JsonPropertyName("input_tokens")] int InputTokens,
+        [property: JsonPropertyName("output_tokens")] int OutputTokens,
+        [property: JsonPropertyName("total_tokens")] int TotalTokens,
+        [property: JsonPropertyName("input_tokens_details")] ResponsesInputTokenDetails? InputTokensDetails = null,
+        [property: JsonPropertyName("output_tokens_details")] ResponsesOutputTokenDetails? OutputTokensDetails = null);
+
+    private sealed record ResponsesInputTokenDetails(
+        [property: JsonPropertyName("cached_tokens")] int CachedTokens = 0);
+
+    private sealed record ResponsesOutputTokenDetails(
+        [property: JsonPropertyName("reasoning_tokens")] int ReasoningTokens = 0);
 }
 
 /// <summary>
