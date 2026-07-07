@@ -146,6 +146,7 @@ public sealed class TurnScope : IDisposable
             TurnSummaryEvent.Emit(_logger, new TurnSummary(
                 TenantId: Tags.TenantId,
                 AgentUser: Tags.AgentUser ?? "(none)",
+                AgentInstanceId: Tags.AgentInstanceId ?? "(none)",
                 UserOid: Tags.UserOid ?? "(none)",
                 ConversationId: Tags.ConversationId,
                 SessionId: Tags.SessionId ?? "(none)",
