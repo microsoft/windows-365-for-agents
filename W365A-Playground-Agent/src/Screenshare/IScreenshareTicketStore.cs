@@ -18,7 +18,7 @@ public interface IScreenshareTicketStore
     ScreenshareTicket? Get(string ticketId);
 
     /// <summary>
-    /// Redeem for the SSO-verified opener. Enforces: exists, not revoked/ended, not past
+    /// Redeem for the authenticated opener. Enforces: exists, not revoked/ended, not past
     /// SessionUntil, first open within RedeemBy, and <paramref name="openerOid"/> == the ticket's
     /// HumanOid. Idempotent for the same verified hirer (allows page refresh) until SessionUntil.
     /// </summary>

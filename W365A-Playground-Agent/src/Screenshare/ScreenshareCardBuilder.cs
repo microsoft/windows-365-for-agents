@@ -7,13 +7,14 @@ using Microsoft.Agents.Core.Models;
 namespace Microsoft.W365APlaygroundAgent.Screenshare;
 
 /// <summary>
-/// Builds the "Watch live" Adaptive Card. Its button is an Action.Submit with
-/// <c>msteams.type = task/fetch</c>, carrying the opaque ticketId so the bot's invoke handler can
-/// return the Teams dialog URL. Card JSON is built as a JsonObject for deterministic serialization.
+/// Builds the "Watch live" Adaptive Card. Its button is an <c>Action.OpenUrl</c> that opens the
+/// viewer page (a top-level browser page — the agentic surface doesn't support task-module dialogs)
+/// carrying the opaque ticketId. The viewer enforces an interactive Entra sign-in so only the bound
+/// hirer can redeem. Card JSON is built as a JsonObject for deterministic serialization.
 /// </summary>
 public static class ScreenshareCardBuilder
 {
-    public static Attachment BuildWatchLiveCard(string ticketId, string? machineLabel, int expiresMinutes)
+    public static Attachment BuildWatchLiveCard(string viewerUrl, string? machineLabel, int expiresMinutes)
     {
         var subtitle = $"{(string.IsNullOrWhiteSpace(machineLabel) ? "Cloud PC" : machineLabel)} \u00B7 offer expires in {expiresMinutes} min";
         var card = new JsonObject
@@ -38,13 +39,9 @@ public static class ScreenshareCardBuilder
             {
                 new JsonObject
                 {
-                    ["type"] = "Action.Submit",
+                    ["type"] = "Action.OpenUrl",
                     ["title"] = "Watch live",
-                    ["data"] = new JsonObject
-                    {
-                        ["ticket"] = ticketId,
-                        ["msteams"] = new JsonObject { ["type"] = "task/fetch" },
-                    },
+                    ["url"] = viewerUrl,
                 },
             },
         };

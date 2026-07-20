@@ -21,13 +21,7 @@ public sealed class ScreenshareOptions
     /// <summary>Hard cap on a single view's duration (SessionUntil policy max).</summary>
     public int MaxSessionMinutes { get; set; } = 120;
 
-    /// <summary>Expected audience of the Teams getAuthToken (the app-reg's api resource / client id). Set with ss-manifest.</summary>
-    public string? SsoAudience { get; set; }
-
-    /// <summary>Tenant for SSO issuer/metadata (falls back to TokenValidation:TenantId / ServiceConnection authority).</summary>
-    public string? SsoTenantId { get; set; }
-
-    /// <summary>DEVELOPMENT-ONLY: if set, redeem/state accept this oid without a real getAuthToken (local testing).</summary>
+    /// <summary>DEVELOPMENT-ONLY: if set, redeem/state accept this oid without a real sign-in (local testing).</summary>
     public string? DevBypassOid { get; set; }
 
     /// <summary>Public HTTPS origin of paw's webapp (e.g. https://{bot-domain}) for the dialog URL. Required in prod.</summary>

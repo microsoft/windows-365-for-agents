@@ -16,7 +16,6 @@ using Microsoft.Agents.Core.Models;
 using Microsoft.Extensions.AI;
 using System.Collections.Concurrent;
 using System.Text.Json;
-using System.Text.Json.Nodes;
 
 namespace Microsoft.W365APlaygroundAgent.Agent;
 
@@ -167,17 +166,6 @@ public class PlaygroundAgent : AgentApplication
         OnActivity(ActivityTypes.Message, OnMessageAsync, isAgenticOnly: true, autoSignInHandlers: agenticHandlers);
         // Non-agentic requests (Playground, WebChat) use OBO auth handler (if configured)
         OnActivity(ActivityTypes.Message, OnMessageAsync, isAgenticOnly: false, autoSignInHandlers: oboHandlers);
-
-        // Screenshare "Watch live" dialog: the Adaptive Card button is an Action.Submit/task/fetch,
-        // which arrives as an Invoke activity named "task/fetch". The handler returns the Teams dialog
-        // URL for the pre-created ticket (no minting here — see ScreenshareIssuer / mint-at-offer).
-        // isInvokeRoute:true — invoke activities are matched separately and must return an InvokeResponse.
-        AddRoute(
-            (tc, _) => Task.FromResult(
-                string.Equals(tc.Activity?.Type, ActivityTypes.Invoke, StringComparison.OrdinalIgnoreCase)
-                && string.Equals(tc.Activity?.Name, "task/fetch", StringComparison.OrdinalIgnoreCase)),
-            OnScreenshareTaskFetchAsync,
-            isInvokeRoute: true);
     }
 
     /// <summary>
@@ -190,6 +178,15 @@ public class PlaygroundAgent : AgentApplication
         {
             // ARI mint requires the agentic auth handler, so only offer on agentic turns.
             if (!turnContext.IsAgenticRequest() || string.IsNullOrEmpty(authHandlerName)) return;
+
+            // The card is an Action.OpenUrl to the viewer page, so we need the public origin now.
+            var baseUrl = _configuration.GetValue<string>("Screenshare:PublicBaseUrl")?.TrimEnd('/');
+            if (string.IsNullOrEmpty(baseUrl))
+            {
+                _logger.LogWarning("[Screenshare] offer skipped: Screenshare:PublicBaseUrl not configured.");
+                return;
+            }
+
             if (_orchestrator.TryConsumePendingScreenshareOffer(conversationKey) is not { } offer) return;
 
             var agentInstanceId = turnContext.Activity?.GetAgenticInstanceId();
@@ -204,8 +201,9 @@ public class PlaygroundAgent : AgentApplication
                 mintAri, agentInstanceId, conversationId, offer.ScreenShareUrl, offer.SessionId, cancellationToken);
             if (ticket is null) return;
 
+            var viewerUrl = $"{baseUrl}/screenshare?ticket={Uri.EscapeDataString(ticket.TicketId)}";
             var redeemMinutes = _configuration.GetValue("Screenshare:RedeemByMinutes", 5);
-            var card = ScreenshareCardBuilder.BuildWatchLiveCard(ticket.TicketId, "Cloud PC", redeemMinutes);
+            var card = ScreenshareCardBuilder.BuildWatchLiveCard(viewerUrl, "Cloud PC", redeemMinutes);
             await turnContext.SendActivityAsync(MessageFactory.Attachment(card), cancellationToken);
             _logger.LogInformation("[Screenshare] Watch-live card offered for session {Session}.", offer.SessionId);
         }
@@ -214,69 +212,6 @@ public class PlaygroundAgent : AgentApplication
             _logger.LogWarning(ex, "[Screenshare] failed to offer Watch-live card (non-fatal).");
         }
     }
-
-    /// <summary>
-    /// Handles the screenshare "Watch live" <c>task/fetch</c> invoke: returns the Teams dialog
-    /// (task module) pointing at the viewer page for the pre-created ticket. No token minting here —
-    /// all agentic work happened at offer time (<see cref="Screenshare.ScreenshareIssuer"/>).
-    /// </summary>
-    private async Task OnScreenshareTaskFetchAsync(ITurnContext turnContext, ITurnState turnState, CancellationToken cancellationToken)
-    {
-        var ticketId = TryExtractTicket(turnContext.Activity?.Value);
-        var baseUrl = _configuration.GetValue<string>("Screenshare:PublicBaseUrl")?.TrimEnd('/');
-
-        JsonObject body;
-        if (string.IsNullOrEmpty(ticketId) || string.IsNullOrEmpty(baseUrl))
-        {
-            _logger.LogWarning("[Screenshare] task/fetch: missing ticket or PublicBaseUrl — returning message dialog.");
-            body = TaskModuleMessage("This live view offer is no longer available. Ask the agent to share again.");
-        }
-        else
-        {
-            var url = $"{baseUrl}/screenshare?ticket={Uri.EscapeDataString(ticketId)}";
-            body = TaskModuleContinue(url, "Cloud PC \u2014 Live View", height: 700, width: 1000);
-        }
-
-        await turnContext.SendActivityAsync(
-            new Activity { Type = ActivityTypes.InvokeResponse, Value = new InvokeResponse { Status = 200, Body = body } },
-            cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <summary>Extracts the ticket id from a task/fetch invoke value (<c>{ data: { ticket }, ... }</c> or <c>{ ticket }</c>).</summary>
-    private static string? TryExtractTicket(object? value)
-    {
-        if (value is null) return null;
-        try
-        {
-            var node = value as JsonNode ?? JsonNode.Parse(JsonSerializer.Serialize(value));
-            return node?["data"]?["ticket"]?.GetValue<string>() ?? node?["ticket"]?.GetValue<string>();
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private static JsonObject TaskModuleContinue(string url, string title, int height, int width) => new()
-    {
-        ["task"] = new JsonObject
-        {
-            ["type"] = "continue",
-            ["value"] = new JsonObject
-            {
-                ["url"] = url,
-                ["fallbackUrl"] = url,
-                ["title"] = title,
-                ["height"] = height,
-                ["width"] = width,
-            },
-        },
-    };
-
-    private static JsonObject TaskModuleMessage(string text) => new()
-    {
-        ["task"] = new JsonObject { ["type"] = "message", ["value"] = text },
-    };
 
     protected async Task WelcomeMessageAsync(ITurnContext turnContext, ITurnState turnState, CancellationToken cancellationToken)
     {

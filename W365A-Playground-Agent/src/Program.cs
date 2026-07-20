@@ -15,6 +15,7 @@ using Microsoft.Agents.A365.Tooling.Services;
 using Microsoft.Agents.Builder;
 using Microsoft.Agents.Hosting.AspNetCore;
 using Microsoft.Agents.Storage;
+using Microsoft.Identity.Web;
 using System.Reflection;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -52,7 +53,6 @@ builder.Services.AddSingleton<IScreenshareTicketStore, ScreenshareTicketStore>()
 builder.Services.Configure<ScreenshareOptions>(builder.Configuration.GetSection(ScreenshareOptions.SectionName));
 builder.Services.AddSingleton<ScreenshareService>();
 builder.Services.AddSingleton<IHirerResolver, GraphHirerResolver>();
-builder.Services.AddSingleton<ISsoTokenValidator, TeamsSsoTokenValidator>();
 builder.Services.AddSingleton<IScreenshareIssuer, ScreenshareIssuer>();
 
 // Global HTTP rate limit on /api/messages: 5 req/min across all callers, no queueing.
@@ -72,6 +72,18 @@ builder.Services.AddRateLimiter(options =>
 // ───── Auth & storage ─────
 // JWT validation for incoming Bot Framework / agentic tokens (config: TokenValidation:*).
 builder.Services.AddAgentAspNetAuthentication(builder.Configuration);
+
+// Screenshare interactive web sign-in (OIDC): the viewer page requires the opener to sign in so
+// we can prove they are the ticket's bound hirer. This adds the "OpenIdConnect" + "Cookies"
+// schemes WITHOUT changing the bot's default JwtBearer scheme — the ScreenshareController
+// authenticates with the cookie and challenges OIDC explicitly, so /api/messages is unaffected.
+// Guarded on a real ClientId so dev (placeholder config + DevBypassOid) skips OIDC entirely.
+var azureAdSection = builder.Configuration.GetSection("AzureAd");
+if (Guid.TryParse(azureAdSection["ClientId"], out _))
+{
+    builder.Services.AddAuthentication()
+        .AddMicrosoftIdentityWebApp(azureAdSection);
+}
 
 // Conversation state. MemoryStorage is fine for development; for production use a durable
 // store (CosmosDbPartitionedStorage, BlobsStorage, etc.) so state survives restarts and

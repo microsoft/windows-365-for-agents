@@ -18,7 +18,7 @@ public enum RedeemFailure { None, NotFound, Expired, WrongHuman, Revoked }
 /// <summary>
 /// Server-side record backing one screenshare view. Only <see cref="TicketId"/> ever travels in a
 /// URL; <see cref="ComputerUrl"/> and <see cref="AriToken"/> are secrets returned only via the
-/// same-origin, SSO-gated redeem endpoint and are never logged.
+/// same-origin, sign-in-gated redeem endpoint and are never logged.
 /// </summary>
 public sealed class ScreenshareTicket
 {

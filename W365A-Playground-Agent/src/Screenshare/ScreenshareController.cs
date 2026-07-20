@@ -1,6 +1,9 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
@@ -8,13 +11,16 @@ using Microsoft.Extensions.Options;
 namespace Microsoft.W365APlaygroundAgent.Screenshare;
 
 /// <summary>
-/// Screenshare viewer page + redeem + state endpoints. Self-authenticated via the Teams getAuthToken
-/// (SSO); endpoints are [AllowAnonymous] to the app's bot-JWT scheme and enforce opener==hirer here.
+/// Screenshare viewer page + redeem + state endpoints. The viewer requires an interactive Entra
+/// sign-in (OIDC): endpoints are [AllowAnonymous] to the bot-JWT scheme and instead authenticate the
+/// opener via the "Cookies" scheme (challenging OpenIdConnect when unauthenticated), then enforce
+/// opener==hirer here. The agentic Teams surface can't host task-module dialogs or getAuthToken, so
+/// the viewer opens as a top-level browser page launched by the card's Action.OpenUrl.
 /// </summary>
 [ApiController]
 [AllowAnonymous]
 public sealed class ScreenshareController(
-    IScreenshareTicketStore store, ISsoTokenValidator sso,
+    IScreenshareTicketStore store,
     IOptions<ScreenshareOptions> options, IWebHostEnvironment env,
     ILogger<ScreenshareController> logger) : ControllerBase
 {
@@ -22,23 +28,37 @@ public sealed class ScreenshareController(
     private const string RedeemCookie = "ss_redeem";
 
     [HttpGet("/screenshare")]
-    public ContentResult ViewerPage()
+    public async Task<IActionResult> ViewerPage()
     {
-        // The page runs inside the Teams dialog iframe (frame-ancestors) and loads the SDK + its nested
-        // viewer iframe from the CDN (script-src / frame-src). It makes only same-origin API calls; the
-        // nested CDN iframe does ARI/ACS in its own context, so our page needs no connect-src for those.
-        // Deliberately NO X-Frame-Options — it would conflict with frame-ancestors and block Teams.
+        // Require interactive sign-in so the opener proves they are the bound hirer. In Development a
+        // configured DevBypassOid short-circuits this so the flow is testable without an app-reg.
+        if (!IsDevBypass())
+        {
+            var auth = await HttpContext.AuthenticateAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+            if (!auth.Succeeded)
+            {
+                // Round-trip back to this exact viewer URL (carries the ticket) after sign-in.
+                var returnUrl = Request.Path + Request.QueryString;
+                return Challenge(
+                    new AuthenticationProperties { RedirectUri = returnUrl },
+                    OpenIdConnectDefaults.AuthenticationScheme);
+            }
+        }
+
+        // Top-level page (NOT a Teams iframe): deny framing entirely, but still allow the SDK's own
+        // nested CDN iframe (frame-src) + scripts. No Teams frame-ancestors / TeamsJS needed anymore.
         var cdn = Uri.TryCreate(_options.ViewerUrl, UriKind.Absolute, out var v)
             ? v.GetLeftPart(UriPartial.Authority)
             : "https://packages.global.cloudinferenceplatform.azure.com";
         Response.Headers["Content-Security-Policy"] = string.Join("; ",
             "default-src 'self'",
-            "frame-ancestors https://teams.microsoft.com https://*.teams.microsoft.com https://*.cloud.microsoft https://*.office.com https://*.office365.com",
-            $"script-src 'self' 'unsafe-inline' https://res.cdn.office.net {cdn}",
+            "frame-ancestors 'none'",
+            $"script-src 'self' 'unsafe-inline' {cdn}",
             $"frame-src {cdn}",
             "style-src 'self' 'unsafe-inline'",
             "img-src 'self' data:",
             "connect-src 'self'");
+        Response.Headers["X-Frame-Options"] = "DENY";
         Response.Headers["X-Content-Type-Options"] = "nosniff";
         Response.Headers["Referrer-Policy"] = "no-referrer";
         return Content(ScreenshareViewerPage.Html, "text/html");
@@ -112,15 +132,19 @@ public sealed class ScreenshareController(
 
     private async Task<string?> ResolveOpenerOidAsync(CancellationToken ct)
     {
-        // DEV-ONLY bypass so the flow is testable locally before the Teams app-reg exists.
-        if (env.IsDevelopment() && !string.IsNullOrWhiteSpace(_options.DevBypassOid))
+        // DEV-ONLY bypass so the flow is testable locally before the app-reg / sign-in exists.
+        if (IsDevBypass())
             return _options.DevBypassOid;
 
-        var auth = Request.Headers.Authorization.ToString();
-        var token = auth.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)
-            ? auth["Bearer ".Length..].Trim() : null;
-        return await sso.ValidateAndGetOidAsync(token, ct);
+        // The opener authenticated interactively via OIDC; their identity lives in the cookie session.
+        var auth = await HttpContext.AuthenticateAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+        if (!auth.Succeeded || auth.Principal is null) return null;
+        return auth.Principal.FindFirst("oid")?.Value
+            ?? auth.Principal.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
     }
+
+    private bool IsDevBypass() =>
+        env.IsDevelopment() && !string.IsNullOrWhiteSpace(_options.DevBypassOid);
 
     private static string Mask(string ticket) =>
         ticket.Length <= 8 ? "****" : $"{ticket[..4]}\u2026{ticket[^4..]}";

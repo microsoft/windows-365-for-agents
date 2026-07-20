@@ -4,11 +4,13 @@
 namespace Microsoft.W365APlaygroundAgent.Screenshare;
 
 /// <summary>
-/// Static viewer HTML served by <c>GET /screenshare</c> and loaded inside the Teams dialog iframe.
-/// It has NO server-injected secrets: it reads the opaque ticket from the URL, does a silent Teams
-/// <c>getAuthToken</c> SSO, redeems via POST /api/screenshare/session, dynamically loads the SDK from
-/// the server-provided viewerUrl (script tag — no CORS), connects the ScreenShareViewer, and syncs
-/// liveness/teardown via POST /api/screenshare/state.
+/// Static viewer HTML served by <c>GET /screenshare</c> as a top-level browser page (the agentic
+/// Teams surface can't host task-module dialogs, so the card's Action.OpenUrl opens this page). The
+/// opener is authenticated by an interactive Entra sign-in enforced server-side before this HTML is
+/// served, so the page carries NO secrets: it reads the opaque ticket from the URL, redeems via POST
+/// /api/screenshare/session (the same-origin auth cookie is sent automatically), dynamically loads
+/// the SDK from the server-provided viewerUrl (script tag — no CORS), connects the ScreenShareViewer,
+/// and syncs liveness/teardown via POST /api/screenshare/state.
 /// </summary>
 internal static class ScreenshareViewerPage
 {
@@ -45,12 +47,11 @@ internal static class ScreenshareViewerPage
           <div id="stage"></div>
           <div id="panel"><div id="panelText"></div><button id="panelBtn" style="display:none"></button></div>
 
-          <script src="https://res.cdn.office.net/teams-js/2.24.0/js/MicrosoftTeams.min.js"></script>
           <script>
           (function () {
             const $ = id => document.getElementById(id);
             const ticket = new URLSearchParams(location.search).get('ticket');
-            let viewer = null, lastStatus = 'connecting', heartbeat = null, ended = false, cachedToken = null;
+            let viewer = null, lastStatus = 'connecting', heartbeat = null, ended = false;
 
             function setStatus(text, cls) { $('statusText').textContent = text; $('dot').className = 'dot ' + (cls || ''); }
             function setControls(state) {
@@ -72,22 +73,17 @@ internal static class ScreenshareViewerPage
               setControls('idle'); showPanel(text);
             }
 
-            function authHeaders(token) { const h = { 'Content-Type': 'application/json' }; if (token) h['Authorization'] = 'Bearer ' + token; return h; }
-
-            async function getToken() {
-              try { cachedToken = await microsoftTeams.authentication.getAuthToken(); } catch (e) { /* dev / not in Teams */ }
-              return cachedToken;
-            }
+            function authHeaders() { return { 'Content-Type': 'application/json' }; } // same-origin cookie is sent automatically
 
             async function reportState(status, useBeacon) {
               if (!ticket) return;
               const payload = { ticket, sdkStatus: status, visibility: document.visibilityState };
-              if (useBeacon && navigator.sendBeacon) { // tab close — cookie auth (Authorization can't be set)
+              if (useBeacon && navigator.sendBeacon) { // tab close — beacon still sends the same-origin cookie
                 navigator.sendBeacon('/api/screenshare/state', new Blob([JSON.stringify(payload)], { type: 'application/json' }));
                 return;
               }
               try {
-                const resp = await fetch('/api/screenshare/state', { method: 'POST', headers: authHeaders(await getToken()), body: JSON.stringify(payload) });
+                const resp = await fetch('/api/screenshare/state', { method: 'POST', headers: authHeaders(), body: JSON.stringify(payload) });
                 if (resp.ok) { const j = await resp.json(); if (j.directive === 'revoked' || j.directive === 'ended') endView('This live view has ended.'); }
               } catch (e) {}
             }
@@ -117,13 +113,11 @@ internal static class ScreenshareViewerPage
 
             async function start() {
               if (!ticket) { showPanel('Missing ticket.'); return; }
-              // initialize TeamsJS; race a timeout so a plain browser (dev) still proceeds
-              try { await Promise.race([microsoftTeams.app.initialize().catch(() => {}), new Promise(r => setTimeout(r, 1500))]); } catch (e) {}
 
               setStatus('authorizing…', 'blue');
               let session;
               try {
-                const resp = await fetch('/api/screenshare/session', { method: 'POST', headers: authHeaders(await getToken()), body: JSON.stringify({ ticket }) });
+                const resp = await fetch('/api/screenshare/session', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ ticket }) });
                 if (resp.status === 401) { showPanel('Sign-in required to view this session.'); return; }
                 if (resp.status === 403) { showPanel('You are not authorized to view this session.'); return; }
                 if (resp.status === 410) { showPanel('This live link has expired.', 'Ask the agent to share again'); return; }

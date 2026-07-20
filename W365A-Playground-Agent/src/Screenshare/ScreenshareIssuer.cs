@@ -6,8 +6,8 @@ namespace Microsoft.W365APlaygroundAgent.Screenshare;
 /// <summary>
 /// Creates a hirer-bound screenshare ticket during the agentic offer turn (mint-at-offer). All
 /// agentic work (ARI token mint + hirer resolution) happens here, inside the proven agentic turn,
-/// so the later task/fetch click needs no agentic auth. Returns null (offer skipped) if any
-/// prerequisite fails — notably an unresolved hirer, which fails closed.
+/// so the later viewer open (the card's Action.OpenUrl) needs no agentic auth. Returns null (offer
+/// skipped) if any prerequisite fails — notably an unresolved hirer, which fails closed.
 /// </summary>
 public interface IScreenshareIssuer
 {

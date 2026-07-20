@@ -55,7 +55,7 @@ public sealed class ScreenshareTicketStore : IScreenshareTicketStore
                 t.Status = ShareStatus.Expired;
                 return RedeemOutcome.Fail(RedeemFailure.Expired);
             }
-            // SSO is the authoritative gate: the opener must be the bound hirer.
+            // The interactive sign-in is the authoritative gate: the opener must be the bound hirer.
             if (!string.Equals(openerOid, t.HumanOid, StringComparison.OrdinalIgnoreCase))
                 return RedeemOutcome.Fail(RedeemFailure.WrongHuman);
 

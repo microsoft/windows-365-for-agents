@@ -46,9 +46,5 @@
     ],
     "validDomains": [
         "<<BOT_DOMAIN>>"
-    ],
-    "webApplicationInfo": {
-        "id": "${{AAD_APP_CLIENT_ID}}",
-        "resource": "api://${{AAD_APP_CLIENT_ID}}"
-    }
+    ]
 }

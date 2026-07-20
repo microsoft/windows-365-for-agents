@@ -20,7 +20,7 @@ public sealed class ScreenshareService
     public string ViewerUrl => _options.ViewerUrl;
     public TimeSpan RedeemBy => TimeSpan.FromMinutes(_options.RedeemByMinutes);
 
-    /// <summary>Public HTTPS origin of paw's webapp (for the Teams dialog URL); empty if unset.</summary>
+    /// <summary>Public HTTPS origin of paw's webapp (for the viewer link in the "Watch live" card); empty if unset.</summary>
     public string PublicBaseUrl => _options.PublicBaseUrl?.TrimEnd('/') ?? "";
 
     /// <summary>Scopes for the ARI OBO exchange (audience/.default).</summary>
