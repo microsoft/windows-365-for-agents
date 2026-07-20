@@ -105,6 +105,10 @@ public sealed class ResponsesOrchestrator
         /// <summary>Set on a direct-client 401; consumed next turn to force MCP re-enumeration.</summary>
         public bool ToolRefreshRequested { get; set; }
 
+        /// <summary>Set when a NEW W365 session starts during a turn; consumed post-turn by the agent to
+        /// offer the screenshare "Watch live" card. (sessionId, screenShareUrl). Null when nothing pending.</summary>
+        public (string SessionId, string ScreenShareUrl)? PendingScreenshareOffer { get; set; }
+
         /// <summary>
         /// Session-scoped desktop tool catalog returned by the W365 MCP gateway after a
         /// successful StartSession + a <c>tools/list</c> issued with <c>params._meta.sessionId</c>.
@@ -1441,6 +1445,62 @@ bool recovered = false;
         return false;
     }
 
+    /// <summary>Extracts and clears a pending screenshare offer for the conversation (post-turn). Null if none.</summary>
+    public (string SessionId, string ScreenShareUrl)? TryConsumePendingScreenshareOffer(string conversationKey)
+    {
+        if (_conversations.TryGetValue(conversationKey, out var state) && state.PendingScreenshareOffer is { } offer)
+        {
+            state.PendingScreenshareOffer = null;
+            return offer;
+        }
+        return null;
+    }
+
+    /// <summary>Best-effort read of "screenShareUrl" from a StartSession result (top-level or nested).</summary>
+    private static string? TryExtractScreenShareUrlFromResult(object? result)
+    {
+        var asString = result switch
+        {
+            null => null,
+            string s => s,
+            JsonElement je => je.GetRawText(),
+            _ => JsonSerializer.Serialize(result, JsonOptions)
+        };
+        if (string.IsNullOrWhiteSpace(asString)) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(asString);
+            return SearchForStringProperty(doc.RootElement, "screenShareUrl");
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static string? SearchForStringProperty(JsonElement el, string name)
+    {
+        switch (el.ValueKind)
+        {
+            case JsonValueKind.Object:
+                foreach (var p in el.EnumerateObject())
+                {
+                    if (p.NameEquals(name) && p.Value.ValueKind == JsonValueKind.String) return p.Value.GetString();
+                    var nested = SearchForStringProperty(p.Value, name);
+                    if (nested is not null) return nested;
+                }
+                break;
+            case JsonValueKind.Array:
+                foreach (var item in el.EnumerateArray())
+                {
+                    var nested = SearchForStringProperty(item, name);
+                    if (nested is not null) return nested;
+                }
+                break;
+        }
+        return null;
+    }
+
     /// <summary>
     /// Validate the model-supplied <c>sessionId</c> against the conversation's
     /// tracked-session set, and if it points at a tracked-but-not-currently-selected session,
@@ -1521,6 +1581,12 @@ bool recovered = false;
                     _logger.LogInformation(
                         "Tracked new W365 sessionId from StartSession: {SessionId} (total active in this conversation: {Count})",
                         sessionId, state.W365SessionIds.Count);
+
+                    // Capture the screenShareUrl so the agent can offer a "Watch live" card after the
+                    // turn (mint-at-offer). Only on a genuinely new session, so we don't re-offer.
+                    var screenShareUrl = TryExtractScreenShareUrlFromResult(result);
+                    if (!string.IsNullOrEmpty(screenShareUrl))
+                        state.PendingScreenshareOffer = (sessionId!, screenShareUrl);
                 }
                 else
                 {

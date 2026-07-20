@@ -4,6 +4,7 @@
 using Microsoft.W365APlaygroundAgent.Agent;
 using Microsoft.W365APlaygroundAgent.Auth;
 using Microsoft.W365APlaygroundAgent.ComputerUse;
+using Microsoft.W365APlaygroundAgent.Screenshare;
 using Microsoft.W365APlaygroundAgent.Telemetry;
 using Microsoft.W365APlaygroundAgent.Throttling;
 using Microsoft.AspNetCore.RateLimiting;
@@ -44,6 +45,15 @@ builder.Services.AddSingleton<IMcpToolServerConfigurationService, McpToolServerC
 // across the (transient) PlaygroundAgent instances. For multi-instance production, back this with
 // a distributed store (AzureTableStorage or Redis) so counts are shared across instances.
 builder.Services.AddSingleton<IUserTurnLimiter, UserTurnLimiter>();
+
+// Screenshare (Computer-See/Control): in-memory ticket store, singleton so tickets are shared
+// across the (transient) agent instances. State resets on restart (MVP; see IScreenshareTicketStore).
+builder.Services.AddSingleton<IScreenshareTicketStore, ScreenshareTicketStore>();
+builder.Services.Configure<ScreenshareOptions>(builder.Configuration.GetSection(ScreenshareOptions.SectionName));
+builder.Services.AddSingleton<ScreenshareService>();
+builder.Services.AddSingleton<IHirerResolver, GraphHirerResolver>();
+builder.Services.AddSingleton<ISsoTokenValidator, TeamsSsoTokenValidator>();
+builder.Services.AddSingleton<IScreenshareIssuer, ScreenshareIssuer>();
 
 // Global HTTP rate limit on /api/messages: 5 req/min across all callers, no queueing.
 // Conservative ceiling for a demo agent — returns 429 immediately on overflow. To raise
