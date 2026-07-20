@@ -15,6 +15,7 @@ using Microsoft.Agents.A365.Tooling.Services;
 using Microsoft.Agents.Builder;
 using Microsoft.Agents.Hosting.AspNetCore;
 using Microsoft.Agents.Storage;
+using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.Identity.Web;
 using System.Reflection;
 
@@ -83,6 +84,11 @@ if (Guid.TryParse(azureAdSection["ClientId"], out _))
 {
     builder.Services.AddAuthentication()
         .AddMicrosoftIdentityWebApp(azureAdSection);
+    // Force the authorization-code flow (code redeemed server-side with the client secret) instead of
+    // Microsoft.Identity.Web's default implicit id_token flow, which would require enabling ID-token
+    // issuance on the blueprint app registration. Auth-code needs only the redirect URI + secret.
+    builder.Services.Configure<OpenIdConnectOptions>(OpenIdConnectDefaults.AuthenticationScheme, o =>
+        o.ResponseType = "code");
 }
 
 // Conversation state. MemoryStorage is fine for development; for production use a durable

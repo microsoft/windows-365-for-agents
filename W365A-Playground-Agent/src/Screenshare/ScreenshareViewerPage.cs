@@ -61,6 +61,8 @@ internal static class ScreenshareViewerPage
             }
             function showPanel(text, btnText, btnFn) {
               if (heartbeat) { clearInterval(heartbeat); heartbeat = null; }
+              setStatus('closed', '');   // reset the top-bar (no longer stuck on "authorizing…"); neutral dot
+              setControls('idle');       // the view isn't live — disable take/release/stop
               $('stage').style.display = 'none'; $('panel').style.display = 'flex';
               $('panelText').textContent = text;
               const b = $('panelBtn');
