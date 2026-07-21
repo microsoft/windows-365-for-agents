@@ -42,6 +42,7 @@ public class PlaygroundAgent : AgentApplication
     - Once a session is active you have a NATIVE computer-use capability: describe physical desktop actions naturally (click, double-click, type text, press keys, scroll, drag, take a screenshot, open a URL) and the system translates them into low-level desktop operations and feeds you back a screenshot automatically.
     - You ALSO have a small set of supplementary function tools for things the computer-use channel cannot do: execute_shell_command, execute_python_code, launch_application, list_processes/kill_process, list_windows, get_accessibility_tree, find_ui_element, analyze_screen, get_system_info, clipboard_read/clipboard_write. sessionId is auto-injected on all of these.
     - Call mcp_W365ComputerUse_EndSession when the user is finished.
+    - The human can watch (and take control of) the live Cloud PC via a "Watch live" card that is offered to them automatically whenever you do desktop work; you don't need to do anything to share it, and their closing the view does not end your session.
     """;
 
     private static string GetAgentInstructions(string? userName)
@@ -67,6 +68,7 @@ public class PlaygroundAgent : AgentApplication
     private readonly IUserTurnLimiter _turnLimiter;
     private readonly ITurnScopeAccessor _turnScopes;
     private readonly IScreenshareIssuer _screenshareIssuer;
+    private readonly IScreenshareTicketStore _ticketStore;
 
     // Reusable auto-sign-in handler names for user authorization (configurable via appsettings.json).
     private readonly string? _agenticAuthHandlerName;
@@ -135,7 +137,8 @@ public class PlaygroundAgent : AgentApplication
         ILogger<PlaygroundAgent> logger,
         IUserTurnLimiter turnLimiter,
         ITurnScopeAccessor turnScopes,
-        IScreenshareIssuer screenshareIssuer) : base(options)
+        IScreenshareIssuer screenshareIssuer,
+        IScreenshareTicketStore ticketStore) : base(options)
     {
         _orchestrator = orchestrator;
         _configuration = configuration;
@@ -144,6 +147,7 @@ public class PlaygroundAgent : AgentApplication
         _turnLimiter = turnLimiter;
         _turnScopes = turnScopes;
         _screenshareIssuer = screenshareIssuer;
+        _ticketStore = ticketStore;
 
         // Read auth handler names from configuration (can be empty/null to disable)
         _agenticAuthHandlerName = _configuration.GetValue<string>("AgentApplication:AgenticAuthHandlerName");
@@ -169,25 +173,37 @@ public class PlaygroundAgent : AgentApplication
     }
 
     /// <summary>
-    /// Mint-at-offer: if a NEW Cloud PC session started this (agentic) turn, mint the ARI token, create a
-    /// hirer-bound ticket, and send the "Watch live" card. Best-effort — never breaks the turn.
+    /// Mint-at-offer: called mid-turn (from the orchestrator's offer callback) the moment a NEW Cloud
+    /// PC session starts. Mints the ARI token, creates a hirer-bound ticket, and sends the "Watch live"
+    /// card so the human can watch DURING the work. Best-effort — never breaks the turn.
     /// </summary>
-    private async Task TryOfferScreenshareAsync(ITurnContext turnContext, string conversationKey, string? authHandlerName, CancellationToken cancellationToken)
+    private async Task OfferScreenshareCardAsync(ITurnContext turnContext, string sessionId, string screenShareUrl, string? authHandlerName, CancellationToken cancellationToken)
     {
         try
         {
             // ARI mint requires the agentic auth handler, so only offer on agentic turns.
             if (!turnContext.IsAgenticRequest() || string.IsNullOrEmpty(authHandlerName)) return;
 
-            // The card is an Action.OpenUrl to the viewer page, so we need the public origin now.
+            // Tenant allow-list gate (fail-closed): the screenshare feature is served ONLY to allow-listed
+            // tenants — it is not multi-tenant ready yet (hirer resolution + the OIDC sign-in app are
+            // home-tenant scoped; AB#63169372). Callers from any other tenant get the normal flow (CUA work
+            // + forwarded screenshots) with NO "Watch live" card. Empty allow-list ⇒ nobody.
+            var callerTenant = ResolveCallerTenantId(turnContext);
+            // [Screenshare][diag] TEMPORARY — surface the resolved tenant so cross-tenant claim values can be validated.
+            _logger.LogInformation("[Screenshare][diag] offer tenant check: resolved tenant={Tenant}.", callerTenant ?? "(unknown)");
+            if (!IsScreenshareAllowedForTenant(callerTenant))
+            {
+                _logger.LogInformation("[Screenshare] offer skipped: tenant {Tenant} not allow-listed.", callerTenant ?? "(unknown)");
+                return;
+            }
+
+            // The card is an Action.OpenUrl to the viewer page, so we need the public origin.
             var baseUrl = _configuration.GetValue<string>("Screenshare:PublicBaseUrl")?.TrimEnd('/');
             if (string.IsNullOrEmpty(baseUrl))
             {
                 _logger.LogWarning("[Screenshare] offer skipped: Screenshare:PublicBaseUrl not configured.");
                 return;
             }
-
-            if (_orchestrator.TryConsumePendingScreenshareOffer(conversationKey) is not { } offer) return;
 
             var agentInstanceId = turnContext.Activity?.GetAgenticInstanceId();
             if (string.IsNullOrEmpty(agentInstanceId)) return;
@@ -196,21 +212,45 @@ public class PlaygroundAgent : AgentApplication
                 // exchangeConnection null is the verified value for the agentic ARI exchange (see wi-006 probe).
                 await UserAuthorization.ExchangeTurnTokenAsync(turnContext, authHandlerName!, exchangeConnection: null!, scopes, ct);
 
-            var conversationId = turnContext.Activity?.Conversation?.Id ?? conversationKey;
+            var conversationId = turnContext.Activity?.Conversation?.Id ?? sessionId;
             var ticket = await _screenshareIssuer.CreateOfferAsync(
-                mintAri, agentInstanceId, conversationId, offer.ScreenShareUrl, offer.SessionId, cancellationToken);
+                mintAri, agentInstanceId, conversationId, screenShareUrl, sessionId, cancellationToken);
             if (ticket is null) return;
 
             var viewerUrl = $"{baseUrl}/screenshare?ticket={Uri.EscapeDataString(ticket.TicketId)}";
-            var redeemMinutes = _configuration.GetValue("Screenshare:RedeemByMinutes", 5);
-            var card = ScreenshareCardBuilder.BuildWatchLiveCard(viewerUrl, "Cloud PC", redeemMinutes);
+            var maxSessionMinutes = _configuration.GetValue("Screenshare:MaxSessionMinutes", 120);
+            var card = ScreenshareCardBuilder.BuildWatchLiveCard(viewerUrl, ticket.RedeemByUtc, ticket.AriTokenExpiryUtc, maxSessionMinutes);
             await turnContext.SendActivityAsync(MessageFactory.Attachment(card), cancellationToken);
-            _logger.LogInformation("[Screenshare] Watch-live card offered for session {Session}.", offer.SessionId);
+            _logger.LogInformation("[Screenshare] Watch-live card offered for session {Session}.", sessionId);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "[Screenshare] failed to offer Watch-live card (non-fatal).");
         }
+    }
+
+    /// <summary>Resolves the caller's Entra tenant id: the authoritative <c>tid</c> claim first, then the
+    /// Activity conversation/recipient tenant. Null if none is present.</summary>
+    private static string? ResolveCallerTenantId(ITurnContext turnContext)
+    {
+        var identity = turnContext.Identity as System.Security.Claims.ClaimsIdentity;
+        var tid = identity?.FindFirst("tid")?.Value
+            ?? identity?.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
+        if (!string.IsNullOrEmpty(tid)) return tid;
+        return turnContext.Activity?.Conversation?.TenantId
+            ?? turnContext.Activity?.Recipient?.TenantId;
+    }
+
+    /// <summary>Fail-closed tenant gate for the screenshare feature: only tenants listed in
+    /// <c>Screenshare:AllowedTenantIds</c> receive the "Watch live" card. Empty/unset list ⇒ nobody.</summary>
+    private bool IsScreenshareAllowedForTenant(string? tenantId)
+    {
+        if (string.IsNullOrEmpty(tenantId)) return false;
+        var allowed = _configuration.GetSection("Screenshare:AllowedTenantIds").Get<string[]>();
+        if (allowed is { Length: > 0 })
+            foreach (var t in allowed)
+                if (string.Equals(t, tenantId, StringComparison.OrdinalIgnoreCase)) return true;
+        return false;
     }
 
     protected async Task WelcomeMessageAsync(ITurnContext turnContext, ITurnState turnState, CancellationToken cancellationToken)
@@ -242,6 +282,14 @@ public class PlaygroundAgent : AgentApplication
         }
         else if (turnContext.Activity.Action == InstallationUpdateActionTypes.Remove)
         {
+            // F1: agent uninstalled — revoke any live screenshare views for this conversation.
+            var conversationId = turnContext.Activity.Conversation?.Id;
+            if (!string.IsNullOrEmpty(conversationId))
+            {
+                var revoked = _ticketStore.RevokeByConversation(conversationId);
+                if (revoked > 0)
+                    _logger.LogInformation("[Screenshare] Uninstall revoked {Count} live view(s) for conversation.", revoked);
+            }
             await turnContext.SendActivityAsync(MessageFactory.Text(AgentFarewellMessage), cancellationToken);
         }
     }
@@ -352,11 +400,11 @@ Func<CancellationToken, Task<ToolReacquireResult>> reacquireTools = async ct =>
     var fresh = await GetToolsAsync(turnContext, turnState, authHandlerName, forceRefresh: true);
     return new ToolReacquireResult(fresh, _lastForceRefreshTokenRefreshed);
 };
-await _orchestrator.RunAsync(conversationKey, userText, GetAgentInstructions(displayName), tools, reacquireTools, turnContext, cancellationToken);
-
-// Mint-at-offer: if a NEW Cloud PC session started this turn, offer the "Watch live" card
-// (mints the ARI token inside this proven agentic turn). Best-effort — never breaks the turn.
-await TryOfferScreenshareAsync(turnContext, conversationKey, authHandlerName, cancellationToken);
+await _orchestrator.RunAsync(conversationKey, userText, GetAgentInstructions(displayName), tools, reacquireTools, turnContext,
+    // Mint-at-offer, fired MID-TURN the moment a new Cloud PC session starts, so the human can watch
+    // DURING the work (not only at end-of-turn). Mints the ARI token in this proven agentic turn.
+    (sessionId, screenShareUrl, ct) => OfferScreenshareCardAsync(turnContext, sessionId, screenShareUrl, authHandlerName, ct),
+    cancellationToken);
             }
             finally
             {

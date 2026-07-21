@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
+using System.Globalization;
 using System.Text.Json.Nodes;
 using Microsoft.Agents.Core.Models;
 
@@ -14,9 +15,18 @@ namespace Microsoft.W365APlaygroundAgent.Screenshare;
 /// </summary>
 public static class ScreenshareCardBuilder
 {
-    public static Attachment BuildWatchLiveCard(string viewerUrl, string? machineLabel, int expiresMinutes)
+    public static Attachment BuildWatchLiveCard(string viewerUrl, DateTimeOffset openByUtc, DateTimeOffset? tokenExpiryUtc, int maxSessionMinutes)
     {
-        var subtitle = $"{(string.IsNullOrWhiteSpace(machineLabel) ? "Cloud PC" : machineLabel)} \u00B7 offer expires in {expiresMinutes} min";
+        // Three independent end-conditions for a live view; the card surfaces each honestly rather than
+        // collapsing them into one (potentially misleading) absolute:
+        //  - openByUtc        = first-open deadline (RedeemBy); the offer link stops working after this.
+        //  - tokenExpiryUtc   = the ARI access token's own expiry — one hard end of the view.
+        //  - maxSessionMinutes + Cloud PC session end = the other end-conditions (policy cap / session gone).
+        // The enforced end is min(all of these); SessionUntilUtc already caps at min(cap, token). UTC for now.
+        // TODO: localize these to the viewer's timezone from Teams user preferences.
+        string FmtMinute(DateTimeOffset t) => t.ToUniversalTime().ToString("yyyy-MM-dd HH:mm 'UTC'", CultureInfo.InvariantCulture);
+        string FmtSecond(DateTimeOffset t) => t.ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss 'UTC'", CultureInfo.InvariantCulture);
+
         var card = new JsonObject
         {
             ["type"] = "AdaptiveCard",
@@ -31,8 +41,18 @@ public static class ScreenshareCardBuilder
                 },
                 new JsonObject
                 {
-                    ["type"] = "TextBlock", ["text"] = subtitle,
-                    ["isSubtle"] = true, ["spacing"] = "None", ["wrap"] = true,
+                    ["type"] = "FactSet",
+                    ["facts"] = new JsonArray
+                    {
+                        new JsonObject { ["title"] = "Open viewer by", ["value"] = FmtMinute(openByUtc) },
+                        new JsonObject { ["title"] = "Access token expires", ["value"] = tokenExpiryUtc is { } te ? FmtSecond(te) : "unknown" },
+                    },
+                },
+                new JsonObject
+                {
+                    ["type"] = "TextBlock",
+                    ["text"] = $"Live view lasts for up to {maxSessionMinutes} minutes, or until the Cloud PC session ends.",
+                    ["isSubtle"] = true, ["size"] = "Small", ["wrap"] = true, ["spacing"] = "Small",
                 },
             },
             ["actions"] = new JsonArray

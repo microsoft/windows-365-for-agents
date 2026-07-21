@@ -4,6 +4,7 @@
 using Microsoft.Agents.Builder;
 using Microsoft.Agents.Core.Models;
 using Microsoft.Extensions.AI;
+using Microsoft.W365APlaygroundAgent.Screenshare;
 using Microsoft.W365APlaygroundAgent.Telemetry.AgentEnrichment;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
@@ -33,6 +34,7 @@ public sealed class ResponsesOrchestrator
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<ResponsesOrchestrator> _logger;
     private readonly ITurnScopeAccessor _turnScopes;
+    private readonly IScreenshareTicketStore _ticketStore;
     private readonly string _responsesUrl;
     private readonly string _model;
     private readonly string _apiKey;
@@ -83,6 +85,7 @@ public sealed class ResponsesOrchestrator
         {
             if (string.IsNullOrWhiteSpace(sessionId)) return false;
             var removed = W365SessionIds.Remove(sessionId);
+            SessionScreenShareUrls.Remove(sessionId);
             if (string.Equals(W365SessionId, sessionId, StringComparison.OrdinalIgnoreCase))
             {
                 W365SessionId = W365SessionIds.LastOrDefault();
@@ -105,9 +108,9 @@ public sealed class ResponsesOrchestrator
         /// <summary>Set on a direct-client 401; consumed next turn to force MCP re-enumeration.</summary>
         public bool ToolRefreshRequested { get; set; }
 
-        /// <summary>Set when a NEW W365 session starts during a turn; consumed post-turn by the agent to
-        /// offer the screenshare "Watch live" card. (sessionId, screenShareUrl). Null when nothing pending.</summary>
-        public (string SessionId, string ScreenShareUrl)? PendingScreenshareOffer { get; set; }
+        /// <summary>Maps each active W365 sessionId → its screenShareUrl (captured at StartSession) so the
+        /// agent can (re-)offer a "Watch live" card for the currently-selected session at any time.</summary>
+        public Dictionary<string, string> SessionScreenShareUrls { get; } = new(StringComparer.OrdinalIgnoreCase);
 
         /// <summary>
         /// Session-scoped desktop tool catalog returned by the W365 MCP gateway after a
@@ -276,11 +279,13 @@ public sealed class ResponsesOrchestrator
         IHttpClientFactory httpClientFactory,
         IConfiguration configuration,
         ILogger<ResponsesOrchestrator> logger,
-        ITurnScopeAccessor turnScopes)
+        ITurnScopeAccessor turnScopes,
+        IScreenshareTicketStore ticketStore)
     {
         _httpClientFactory = httpClientFactory;
         _logger = logger;
         _turnScopes = turnScopes;
+        _ticketStore = ticketStore;
 
         var endpoint = (configuration["AIServices:AzureOpenAI:Endpoint"]
             ?? throw new InvalidOperationException("AIServices:AzureOpenAI:Endpoint is required.")).TrimEnd('/');
@@ -310,6 +315,7 @@ public sealed class ResponsesOrchestrator
         IList<AITool> tools,
         Func<CancellationToken, Task<ToolReacquireResult>> reacquireTools,
         ITurnContext turnContext,
+        Func<string, string, CancellationToken, Task>? offerScreenshareAsync,
         CancellationToken cancellationToken)
     {
         // Soft cap: evict the least-recently-used conversation when a new key would exceed the limit.
@@ -406,6 +412,9 @@ public sealed class ResponsesOrchestrator
             state.ToolRefreshRequested = false; // same-turn recovery satisfies any deferred request
             return true;
         }
+
+        // At most one "Watch live" auto-offer attempt per turn (a failed mint must not spam).
+        var screenshareOfferAttempted = false;
 
         // The agent loop — the canonical pattern: call model → stream text → execute any tool
         // calls the model requested → repeat until the model returns a message with no further
@@ -548,6 +557,27 @@ bool recovered = false;
             foreach (var call in computerCalls)
             {
                 await HandleComputerCallAsync(state, history, call, turnContext, cancellationToken);
+            }
+
+            // Aggressive auto-(re)offer of the "Watch live" card: if this iteration did any CUA work
+            // (StartSession, a W365 supplementary desktop tool, or a native computer_call) and the
+            // selected session has NO live/redeemable card, send a fresh one so the hirer can always
+            // watch — including after they closed/stopped a prior view or let an offer expire. Bounded
+            // to one attempt per turn so a failing mint (e.g. unresolved hirer) can't spam.
+            if (!screenshareOfferAttempted && offerScreenshareAsync is not null)
+            {
+                var cuaActivity = computerCalls.Count > 0
+                    || functionCalls.Any(fc => fc.TryGetProperty("name", out var n) && n.GetString() is { } nm
+                        && (W365LifecycleToolNames.Contains(nm) || W365SupplementaryDesktopTools.Contains(nm)));
+                if (cuaActivity
+                    && state.W365SessionId is { } offSid
+                    && state.SessionScreenShareUrls.TryGetValue(offSid, out var offUrl)
+                    && !_ticketStore.HasRedeemableTicket(offSid))
+                {
+                    screenshareOfferAttempted = true;
+                    try { await offerScreenshareAsync(offSid, offUrl, cancellationToken); }
+                    catch (Exception ex) { _logger.LogWarning(ex, "[Screenshare] auto-offer failed (non-fatal)."); }
+                }
             }
         }
     }
@@ -1446,16 +1476,6 @@ bool recovered = false;
     }
 
     /// <summary>Extracts and clears a pending screenshare offer for the conversation (post-turn). Null if none.</summary>
-    public (string SessionId, string ScreenShareUrl)? TryConsumePendingScreenshareOffer(string conversationKey)
-    {
-        if (_conversations.TryGetValue(conversationKey, out var state) && state.PendingScreenshareOffer is { } offer)
-        {
-            state.PendingScreenshareOffer = null;
-            return offer;
-        }
-        return null;
-    }
-
     /// <summary>Best-effort read of "screenShareUrl" from a StartSession result (top-level or nested).</summary>
     private static string? TryExtractScreenShareUrlFromResult(object? result)
     {
@@ -1486,6 +1506,25 @@ bool recovered = false;
                 foreach (var p in el.EnumerateObject())
                 {
                     if (p.NameEquals(name) && p.Value.ValueKind == JsonValueKind.String) return p.Value.GetString();
+
+                    // MCP content blocks: {"type":"text","text":"<json>"} — the W365 lifecycle tools
+                    // return their payload as a JSON-encoded STRING inside a content array, so the target
+                    // property lives one parse deeper. Re-parse the inner text (mirrors SearchForSessionId).
+                    if (p.NameEquals("text") && p.Value.ValueKind == JsonValueKind.String)
+                    {
+                        var inner = p.Value.GetString();
+                        if (!string.IsNullOrWhiteSpace(inner))
+                        {
+                            try
+                            {
+                                using var innerDoc = JsonDocument.Parse(inner);
+                                var innerFound = SearchForStringProperty(innerDoc.RootElement, name);
+                                if (innerFound is not null) return innerFound;
+                            }
+                            catch (JsonException) { /* not JSON; skip */ }
+                        }
+                    }
+
                     var nested = SearchForStringProperty(p.Value, name);
                     if (nested is not null) return nested;
                 }
@@ -1582,11 +1621,30 @@ bool recovered = false;
                         "Tracked new W365 sessionId from StartSession: {SessionId} (total active in this conversation: {Count})",
                         sessionId, state.W365SessionIds.Count);
 
-                    // Capture the screenShareUrl so the agent can offer a "Watch live" card after the
-                    // turn (mint-at-offer). Only on a genuinely new session, so we don't re-offer.
+                    // Cache the screenShareUrl so the agent can (re-)offer a "Watch live" card for this
+                    // session at any time (the aggressive auto-offer in RunAsync reads this cache).
                     var screenShareUrl = TryExtractScreenShareUrlFromResult(result);
                     if (!string.IsNullOrEmpty(screenShareUrl))
-                        state.PendingScreenshareOffer = (sessionId!, screenShareUrl);
+                    {
+                        // [Screenshare][diag] TEMPORARY — confirm extraction succeeds after the MCP text-block fix.
+                        _logger.LogInformation("[Screenshare][diag] screenShareUrl extracted for session {SessionId} (len={Len}).", sessionId, screenShareUrl.Length);
+                        state.SessionScreenShareUrls[sessionId!] = screenShareUrl;
+                    }
+                    else
+                    {
+                        // [Screenshare][diag] TEMPORARY — on failure, dump the raw result shape so we can see
+                        // the actual structure. screenShareUrl is a URL (not the ARI bearer token), so a
+                        // bounded snippet is safe to log. Remove this once the offer path is confirmed.
+                        var raw = result switch
+                        {
+                            null => "(null)",
+                            string s => s,
+                            JsonElement je => je.GetRawText(),
+                            _ => JsonSerializer.Serialize(result, JsonOptions)
+                        };
+                        _logger.LogWarning("[Screenshare][diag] screenShareUrl NOT found for session {SessionId}; result[0..600]={Raw}",
+                            sessionId, raw.Length > 600 ? raw[..600] : raw);
+                    }
                 }
                 else
                 {
@@ -1631,6 +1689,17 @@ bool recovered = false;
             else
             {
                 _logger.LogWarning("StartSession result did not contain a sessionId — auto-injection will not work this turn.");
+                // [StartSession][diag] TEMPORARY — dump the full result body so the exact backend error
+                // (e.g. -32000 + correlation id) is visible when provisioning fails. Remove after diagnosis.
+                var diagRaw = result switch
+                {
+                    null => "(null)",
+                    string s => s,
+                    JsonElement je => je.GetRawText(),
+                    _ => JsonSerializer.Serialize(result, JsonOptions)
+                };
+                _logger.LogWarning("[StartSession][diag] full result body ({Len} chars): {Body}",
+                    diagRaw.Length, diagRaw.Length > 2000 ? diagRaw[..2000] : diagRaw);
             }
         }
         else if (string.Equals(toolName, W365EndSessionToolName, StringComparison.OrdinalIgnoreCase))
@@ -1668,6 +1737,13 @@ bool recovered = false;
                         "EndSession removed non-selected W365 sessionId {SessionId}; selected unchanged ({Selected}; remaining active: {Count}).",
                         endedId, state.W365SessionId, state.W365SessionIds.Count);
                 }
+
+                // F1: proactively revoke any live screenshare view bound to this Cloud PC session so the
+                // human's viewer tears down on the next heartbeat ("revoked") instead of waiting for the
+                // SDK to notice the session died or for SessionUntil to elapse.
+                var revoked = _ticketStore.RevokeBySession(endedId);
+                if (revoked > 0)
+                    _logger.LogInformation("[Screenshare] EndSession revoked {Count} live view(s) for session {SessionId}.", revoked, endedId);
             }
             else
             {

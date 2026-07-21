@@ -41,4 +41,18 @@ public interface IScreenshareTicketStore
 
     /// <summary>Evict tickets past SessionUntil. Returns the count removed.</summary>
     int SweepExpired();
+
+    /// <summary>
+    /// True if <paramref name="w365SessionId"/> has a ticket that is still usable — <c>Offered</c> within
+    /// its RedeemBy window, or <c>Redeemed</c>/<c>Live</c>/<c>Controlling</c> within SessionUntil — i.e. a
+    /// "Watch live" card the hirer could still open or is actively viewing.
+    /// </summary>
+    bool HasRedeemableTicket(string w365SessionId);
+
+    /// <summary>
+    /// Remove tickets for <paramref name="w365SessionId"/> that are no longer an active view (anything not
+    /// <c>Redeemed</c>/<c>Live</c>/<c>Controlling</c>) — called before minting a fresh offer so superseded
+    /// tickets don't accumulate. Returns the count removed.
+    /// </summary>
+    int PurgeSupersededTickets(string w365SessionId);
 }

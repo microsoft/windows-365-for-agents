@@ -29,6 +29,7 @@ public sealed class ScreenshareTicketStore : IScreenshareTicketStore
             CreatedAt = now,
             RedeemByUtc = now + spec.RedeemBy,
             SessionUntilUtc = spec.SessionUntilUtc,
+            AriTokenExpiryUtc = spec.AriTokenExpiryUtc,
             CardActivityId = spec.CardActivityId,
             Status = ShareStatus.Offered,
             LastHeartbeatAt = now,
@@ -107,6 +108,43 @@ public sealed class ScreenshareTicketStore : IScreenshareTicketStore
         var removed = 0;
         foreach (var kvp in _tickets)
             if (now > kvp.Value.SessionUntilUtc && _tickets.TryRemove(kvp.Key, out _)) removed++;
+        return removed;
+    }
+
+    public bool HasRedeemableTicket(string w365SessionId)
+    {
+        var now = DateTimeOffset.UtcNow;
+        foreach (var t in _tickets.Values)
+        {
+            if (!string.Equals(t.W365SessionId, w365SessionId, StringComparison.OrdinalIgnoreCase)) continue;
+            lock (t)
+            {
+                if (now > t.SessionUntilUtc) continue;
+                switch (t.Status)
+                {
+                    case ShareStatus.Redeemed:
+                    case ShareStatus.Live:
+                    case ShareStatus.Controlling:
+                        return true;
+                    case ShareStatus.Offered when now <= t.RedeemByUtc:
+                        return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    public int PurgeSupersededTickets(string w365SessionId)
+    {
+        var removed = 0;
+        foreach (var kvp in _tickets)
+        {
+            var t = kvp.Value;
+            if (!string.Equals(t.W365SessionId, w365SessionId, StringComparison.OrdinalIgnoreCase)) continue;
+            bool active;
+            lock (t) active = t.Status is ShareStatus.Redeemed or ShareStatus.Live or ShareStatus.Controlling;
+            if (!active && _tickets.TryRemove(kvp.Key, out _)) removed++;
+        }
         return removed;
     }
 

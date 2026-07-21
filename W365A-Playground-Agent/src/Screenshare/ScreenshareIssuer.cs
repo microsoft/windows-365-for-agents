@@ -51,10 +51,14 @@ public sealed class ScreenshareIssuer(
         }
 
         var now = DateTimeOffset.UtcNow;
+        var tokenExpiry = ScreenshareService.ReadExpiry(token);
+        // Drop any superseded tickets for this session (expired/ended/revoked offers) before minting a
+        // fresh one, so re-offers don't accumulate orphans in the in-memory store.
+        store.PurgeSupersededTickets(w365SessionId);
         var ticket = store.Create(new NewTicket(
             computerUrl, token, svc.ViewerUrl, ShareMode.Interactive, ShareScope.SeeControl,
             conversationId, hirerOid, w365SessionId, svc.RedeemBy,
-            svc.ComputeSessionUntil(now, ScreenshareService.ReadExpiry(token))));
+            svc.ComputeSessionUntil(now, tokenExpiry), tokenExpiry));
 
         logger.LogInformation("[Screenshare] offer ticket created for session {Session}.", w365SessionId);
         return ticket;

@@ -77,9 +77,9 @@ internal static class ScreenshareViewerPage
 
             function authHeaders() { return { 'Content-Type': 'application/json' }; } // same-origin cookie is sent automatically
 
-            async function reportState(status, useBeacon) {
+            async function reportState(status, useBeacon, reason) {
               if (!ticket) return;
-              const payload = { ticket, sdkStatus: status, visibility: document.visibilityState };
+              const payload = { ticket, sdkStatus: status, visibility: document.visibilityState, reason: reason || null };
               if (useBeacon && navigator.sendBeacon) { // tab close — beacon still sends the same-origin cookie
                 navigator.sendBeacon('/api/screenshare/state', new Blob([JSON.stringify(payload)], { type: 'application/json' }));
                 return;
@@ -104,12 +104,12 @@ internal static class ScreenshareViewerPage
               const map = { connecting: ['connecting…', 'blue'], connected: ['Live — viewing', 'green'], controlling: ['Live — you have control', 'green'], 'view-only': ['Live — viewing', 'green'], disconnected: ['Disconnected', 'red'] };
               const m = map[state] || [state, ''];
               setStatus(m[0], m[1]); setControls(state);
-              reportState(state, false);
+              reportState(state, false, state === 'disconnected' ? 'sdk-disconnected' : undefined);
               if (state === 'disconnected') endView('The Cloud PC session ended.');
             }
             function onError(code, msg) {
-              if (code === 'TOKEN_EXPIRED') { endView('The live view expired. Ask the agent to share again.'); return; }
-              if (code === 'START_FAILED') { showPanel('Could not connect to the Cloud PC.', 'Ask the agent to share again'); return; }
+              if (code === 'TOKEN_EXPIRED') { endView('The live view expired. Go back to Teams and ask the agent to share again.'); return; }
+              if (code === 'START_FAILED') { showPanel('Could not connect to the Cloud PC.', 'Try again', function () { location.reload(); }); return; }
               setStatus('error: ' + code, 'red');
             }
 
@@ -120,9 +120,9 @@ internal static class ScreenshareViewerPage
               let session;
               try {
                 const resp = await fetch('/api/screenshare/session', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ ticket }) });
-                if (resp.status === 401) { showPanel('Sign-in required to view this session.'); return; }
+                if (resp.status === 401) { showPanel('Your sign-in has expired.', 'Sign in again', function () { location.reload(); }); return; }
                 if (resp.status === 403) { showPanel('You are not authorized to view this session.'); return; }
-                if (resp.status === 410) { showPanel('This live link has expired.', 'Ask the agent to share again'); return; }
+                if (resp.status === 410) { showPanel('This live link has expired. Go back to Teams and ask the agent to share again.'); return; }
                 if (!resp.ok) { showPanel('Could not start the live view.'); return; }
                 session = await resp.json();
               } catch (e) { showPanel('Could not reach the service.'); return; }
@@ -141,12 +141,12 @@ internal static class ScreenshareViewerPage
               } catch (e) { onError('START_FAILED', e && e.message); return; }
 
               heartbeat = setInterval(() => reportState(lastStatus, false), 12000);
-              window.addEventListener('pagehide', () => reportState('disconnected', true));
+              window.addEventListener('pagehide', () => reportState('disconnected', true, 'page-hide'));
             }
 
             $('takeBtn').onclick = () => { try { viewer.takeControl(); } catch (e) {} };
             $('releaseBtn').onclick = () => { try { viewer.releaseControl(); } catch (e) {} };
-            $('stopBtn').onclick = () => { reportState('disconnected', false); endView('You ended the live view.'); };
+            $('stopBtn').onclick = () => { reportState('disconnected', false, 'user-stop'); endView('You ended the live view.'); };
             document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('releaseBtn').disabled) $('releaseBtn').click(); });
 
             start();

@@ -30,6 +30,9 @@ public sealed class ScreenshareController(
     [HttpGet("/screenshare")]
     public async Task<IActionResult> ViewerPage()
     {
+        var ticketForLog = Request.Query.TryGetValue("ticket", out var tq) && !string.IsNullOrEmpty(tq)
+            ? Mask(tq.ToString()) : "(none)";
+
         // Require interactive sign-in so the opener proves they are the bound hirer. In Development a
         // configured DevBypassOid short-circuits this so the flow is testable without an app-reg.
         if (!IsDevBypass())
@@ -37,12 +40,20 @@ public sealed class ScreenshareController(
             var auth = await HttpContext.AuthenticateAsync(CookieAuthenticationDefaults.AuthenticationScheme);
             if (!auth.Succeeded)
             {
+                logger.LogInformation("[Screenshare] viewer page: sign-in required, challenging OIDC ticket={Ticket}", ticketForLog);
                 // Round-trip back to this exact viewer URL (carries the ticket) after sign-in.
                 var returnUrl = Request.Path + Request.QueryString;
                 return Challenge(
                     new AuthenticationProperties { RedirectUri = returnUrl },
                     OpenIdConnectDefaults.AuthenticationScheme);
             }
+            var openerOid = auth.Principal?.FindFirst("oid")?.Value
+                ?? auth.Principal?.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+            logger.LogInformation("[Screenshare] viewer page served ticket={Ticket} oid={Oid}", ticketForLog, openerOid ?? "(none)");
+        }
+        else
+        {
+            logger.LogInformation("[Screenshare] viewer page served (dev bypass) ticket={Ticket}", ticketForLog);
         }
 
         // Top-level page (NOT a Teams iframe): deny framing entirely, but still allow the SDK's own
@@ -69,7 +80,11 @@ public sealed class ScreenshareController(
     {
         if (string.IsNullOrWhiteSpace(body?.Ticket)) return BadRequest();
         var oid = await ResolveOpenerOidAsync(ct);
-        if (oid is null) return Unauthorized();
+        if (oid is null)
+        {
+            logger.LogWarning("[Screenshare] redeem denied: no opener identity (sign-in unresolved) ticket={Ticket}", Mask(body.Ticket));
+            return Unauthorized();
+        }
 
         var outcome = store.Redeem(body.Ticket, oid, Request.Cookies[RedeemCookie]);
         logger.LogInformation("[Screenshare] redeem ticket={Ticket} oid={Oid} success={Ok} reason={Reason}",
@@ -101,10 +116,18 @@ public sealed class ScreenshareController(
 
         var oid = await ResolveOpenerOidAsync(ct);
         var cookieOk = Request.Cookies.TryGetValue(RedeemCookie, out var c) && c == t.RedeemCookieId;
-        if (oid is null && !cookieOk) return Unauthorized();
+        if (oid is null && !cookieOk)
+        {
+            logger.LogWarning("[Screenshare] state denied: unauthenticated ticket={Ticket}", Mask(body.Ticket));
+            return Unauthorized();
+        }
         if (oid is not null && !string.Equals(oid, t.HumanOid, StringComparison.OrdinalIgnoreCase) && !cookieOk)
+        {
+            logger.LogWarning("[Screenshare] state denied: opener {Oid} != hirer ticket={Ticket}", oid, Mask(body.Ticket));
             return StatusCode(StatusCodes.Status403Forbidden);
+        }
 
+        var prev = t.Status;
         var mapped = body.SdkStatus?.ToLowerInvariant() switch
         {
             "connected" => ShareStatus.Live,
@@ -116,9 +139,21 @@ public sealed class ScreenshareController(
         if (mapped is { } m)
         {
             store.SetStatus(body.Ticket, m);
-            if (m is ShareStatus.Controlling or ShareStatus.Live) // audit control state
-                logger.LogInformation("[Screenshare] state ticket={Ticket} oid={Oid} sdk={Sdk}",
-                    Mask(body.Ticket), oid ?? "(cookie)", body.SdkStatus);
+            // Log only real transitions (SetStatus ignores terminal Revoked/Ended) — not every 12s heartbeat.
+            if (prev is not (ShareStatus.Revoked or ShareStatus.Ended) && m != prev)
+            {
+                if (m is ShareStatus.Ended)
+                {
+                    var lasted = t.RedeemedAt is { } r ? (int)(DateTimeOffset.UtcNow - r).TotalSeconds : -1;
+                    logger.LogInformation("[Screenshare] view ended ticket={Ticket} oid={Oid} reason={Reason} visibility={Vis} lastedSec={Lasted}",
+                        Mask(body.Ticket), oid ?? "(cookie)", body.Reason ?? "(none)", body.Visibility ?? "(none)", lasted);
+                }
+                else
+                {
+                    logger.LogInformation("[Screenshare] view {Status} ticket={Ticket} oid={Oid} sdk={Sdk}",
+                        m, Mask(body.Ticket), oid ?? "(cookie)", body.SdkStatus);
+                }
+            }
         }
         store.Heartbeat(body.Ticket);
 

@@ -94,6 +94,7 @@ public sealed class GraphHirerResolver : IHirerResolver
                         && o.TryGetProperty("id", out var id))
                         return CacheAndReturn(agentInstanceId, id.GetString());
             }
+            _logger.LogWarning("GraphHirerResolver: no user owner found for {Instance} (share will be denied).", agentInstanceId);
             return CacheAndReturn(agentInstanceId, null);
         }
         catch (Exception ex)
