@@ -24,7 +24,7 @@ public sealed class ScreenshareTicket
 {
     public required string TicketId { get; init; }
     public required string ComputerUrl { get; init; }
-    public string? AriToken { get; init; }          // null under Strategy B (mint-on-demand)
+    public string? AriToken { get; init; }          // null when the token is minted on demand
     public required string ViewerUrl { get; init; }
     public ShareMode Mode { get; init; }
     public ShareScope Scope { get; init; }
@@ -37,8 +37,6 @@ public sealed class ScreenshareTicket
     public DateTimeOffset RedeemByUtc { get; init; }     // first-open deadline
     public DateTimeOffset SessionUntilUtc { get; init; } // hard end of the view = min(policy cap, token exp)
     public DateTimeOffset? AriTokenExpiryUtc { get; init; } // the ARI access token's own exp claim (for display)
-
-    public string? CardActivityId { get; set; }          // for proactive card updates (Phase 2)
 
     // Mutated under the store's per-ticket lock:
     public ShareStatus Status { get; set; }
@@ -53,7 +51,7 @@ public sealed record NewTicket(
     ShareMode Mode, ShareScope Scope,
     string ConversationId, string HumanOid, string W365SessionId,
     TimeSpan RedeemBy, DateTimeOffset SessionUntilUtc,
-    DateTimeOffset? AriTokenExpiryUtc = null, string? CardActivityId = null);
+    DateTimeOffset? AriTokenExpiryUtc = null);
 
 /// <summary>Result of a redeem attempt. On success, carries the ticket + a continuity cookie id.</summary>
 public sealed record RedeemOutcome(bool Success, RedeemFailure Reason,

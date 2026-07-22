@@ -137,7 +137,7 @@ public sealed class ResponsesOrchestrator
     // them rather than discover them dynamically because the MCP protocol does not (yet)
     // expose semantic role metadata on tools — `tools/list` returns names + schemas but no
     // hint of which tool is "session.start" vs "session.end", etc. Until the W365 server
-    // publishes `_meta.role` annotations (tracked as a follow-up issue), the orchestrator
+    // publishes `_meta.role` annotations, the orchestrator
     // must know specific names to:
     //   1. Recognize lifecycle tools so it can parse the sessionId out of StartSession's
     //      response, refresh the session-scoped tool catalog, capture the initial
@@ -148,8 +148,8 @@ public sealed class ResponsesOrchestrator
     //      (see MapActionToMcpTool — this mapping is intrinsic translation between two
     //      independent third-party APIs and cannot be discovered at runtime).
     //
-    // W365 MCP is in preview; names CAN change. To minimize fallout when that happens, see
-    // CONSIDER comments at each call site and the follow-up issues filed in the repo.
+    // W365 MCP is in preview; names CAN change. To minimize fallout when that happens, see the
+    // CONSIDER comments at each call site.
     // -------------------------------------------------------------------------------------
 
     // W365 explicit-session contract tool names — the only W365 tools published via tools/list
@@ -159,7 +159,7 @@ public sealed class ResponsesOrchestrator
     // CONSIDER (W365 preview churn): if the server team renames these, every hook in this
     // file that branches on W365LifecycleToolNames will silently fail. A startup sanity
     // check that warns when an expected lifecycle tool is missing from the gateway catalog
-    // is tracked as a follow-up.
+    // would harden this.
     private const string W365StartSessionToolName = "mcp_W365ComputerUse_StartSession";
     private const string W365EndSessionToolName = "mcp_W365ComputerUse_EndSession";
     private const string W365GetSessionDetailsToolName = "mcp_W365ComputerUse_GetSessionDetails";
@@ -216,7 +216,7 @@ public sealed class ResponsesOrchestrator
     // CONSIDER (W365 preview churn): an allow-list silently drops any newly-added server
     // tool — they will not be exposed to the model until this list is updated. An
     // alternative deny-list approach (drop the 8 CUA-redundant names + `browser_*` prefix,
-    // expose everything else) auto-picks-up new tools and is tracked as a follow-up.
+    // expose everything else) would auto-pick-up new tools.
     private static readonly HashSet<string> W365SupplementaryDesktopTools = new(StringComparer.OrdinalIgnoreCase)
     {
         // OS / process control
@@ -256,7 +256,7 @@ public sealed class ResponsesOrchestrator
 
     private const int MaxConversations = 100;
 
-    // wi-017 reactive MCP 401 recovery bounds (configurable via appsettings ToolCache:*).
+    // Reactive MCP 401 recovery bounds (configurable via appsettings ToolCache:*).
     private readonly int _max401RetriesPerCall;
     private readonly int _max401ReacquiresPerTurn;
 
@@ -298,7 +298,7 @@ public sealed class ResponsesOrchestrator
         // See: https://learn.microsoft.com/azure/foundry/openai/api-version-lifecycle
         _responsesUrl = $"{endpoint}/openai/v1/responses";
 
-        // wi-017: per-call retry and per-turn re-enumeration caps (default 1 each).
+        // Per-call retry and per-turn re-enumeration caps (default 1 each).
         _max401RetriesPerCall = configuration.GetValue("ToolCache:Max401RetriesPerCall", 1);
         _max401ReacquiresPerTurn = configuration.GetValue("ToolCache:Max401ReacquiresPerTurn", 1);
     }
@@ -391,7 +391,7 @@ public sealed class ResponsesOrchestrator
 
         history.Add(MakeUserTextMessage(userMessage));
 
-        // wi-017 reactive recovery: on an MCP 401, re-enumerate MCP tools (fresh transport token)
+        // Reactive recovery: on an MCP 401, re-enumerate MCP tools (fresh transport token)
         // and rebuild the plumbing, bounded by _max401ReacquiresPerTurn. TryHandleMcp401 has
         // already reset the W365 client latch, so EnsureW365McpClient re-resolves from fresh tools.
         int reacquireCount = 0;
@@ -973,8 +973,8 @@ bool recovered = false;
     /// the other, so this mapping CANNOT be discovered at runtime. The fragility is real but
     /// intrinsic — if either side renames an action / tool / argument, this method must be
     /// updated. The W365 server is in preview; a startup sanity check that verifies every
-    /// target tool name returned here is actually present in the session-scoped catalog is
-    /// tracked as a follow-up.
+    /// target tool name returned here is actually present in the session-scoped catalog
+    /// would harden this.
     /// </remarks>
     private static (string ToolName, Dictionary<string, object?> Args)? MapActionToMcpTool(
         string actionType, JsonElement action, string? sessionId)
@@ -1626,15 +1626,13 @@ bool recovered = false;
                     var screenShareUrl = TryExtractScreenShareUrlFromResult(result);
                     if (!string.IsNullOrEmpty(screenShareUrl))
                     {
-                        // [Screenshare][diag] TEMPORARY — confirm extraction succeeds after the MCP text-block fix.
-                        _logger.LogInformation("[Screenshare][diag] screenShareUrl extracted for session {SessionId} (len={Len}).", sessionId, screenShareUrl.Length);
+                        _logger.LogDebug("[Screenshare] cached screenShareUrl for session {SessionId} (len {Len}).", sessionId, screenShareUrl.Length);
                         state.SessionScreenShareUrls[sessionId!] = screenShareUrl;
                     }
                     else
                     {
-                        // [Screenshare][diag] TEMPORARY — on failure, dump the raw result shape so we can see
-                        // the actual structure. screenShareUrl is a URL (not the ARI bearer token), so a
-                        // bounded snippet is safe to log. Remove this once the offer path is confirmed.
+                        // A new session with no screenShareUrl means we can't offer the live-view card; log the
+                        // bounded result shape (a URL, not the ARI token — safe) to diagnose gateway payload drift.
                         var raw = result switch
                         {
                             null => "(null)",
@@ -1642,7 +1640,7 @@ bool recovered = false;
                             JsonElement je => je.GetRawText(),
                             _ => JsonSerializer.Serialize(result, JsonOptions)
                         };
-                        _logger.LogWarning("[Screenshare][diag] screenShareUrl NOT found for session {SessionId}; result[0..600]={Raw}",
+                        _logger.LogWarning("[Screenshare] no screenShareUrl in StartSession result for session {SessionId} — live-view offer unavailable; result: {Raw}",
                             sessionId, raw.Length > 600 ? raw[..600] : raw);
                     }
                 }
@@ -1688,18 +1686,17 @@ bool recovered = false;
             }
             else
             {
-                _logger.LogWarning("StartSession result did not contain a sessionId — auto-injection will not work this turn.");
-                // [StartSession][diag] TEMPORARY — dump the full result body so the exact backend error
-                // (e.g. -32000 + correlation id) is visible when provisioning fails. Remove after diagnosis.
-                var diagRaw = result switch
+                // StartSession returned no sessionId — capture the backend result (bounded) so the -32000
+                // error + CorrelationId are visible for backend triage. No secret in the body.
+                var failBody = result switch
                 {
                     null => "(null)",
                     string s => s,
                     JsonElement je => je.GetRawText(),
                     _ => JsonSerializer.Serialize(result, JsonOptions)
                 };
-                _logger.LogWarning("[StartSession][diag] full result body ({Len} chars): {Body}",
-                    diagRaw.Length, diagRaw.Length > 2000 ? diagRaw[..2000] : diagRaw);
+                _logger.LogWarning("StartSession returned no sessionId (auto-injection unavailable this turn) — backend result: {Result}",
+                    failBody.Length > 800 ? failBody[..800] : failBody);
             }
         }
         else if (string.Equals(toolName, W365EndSessionToolName, StringComparison.OrdinalIgnoreCase))

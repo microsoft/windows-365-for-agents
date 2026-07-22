@@ -49,7 +49,7 @@ builder.Services.AddSingleton<IMcpToolServerConfigurationService, McpToolServerC
 builder.Services.AddSingleton<IUserTurnLimiter, UserTurnLimiter>();
 
 // Screenshare (Computer-See/Control): in-memory ticket store, singleton so tickets are shared
-// across the (transient) agent instances. State resets on restart (MVP; see IScreenshareTicketStore).
+// across the (transient) agent instances. State resets on restart (see IScreenshareTicketStore).
 builder.Services.AddSingleton<IScreenshareTicketStore, ScreenshareTicketStore>();
 builder.Services.Configure<ScreenshareOptions>(builder.Configuration.GetSection(ScreenshareOptions.SectionName));
 builder.Services.AddSingleton<ScreenshareService>();
@@ -88,7 +88,20 @@ if (Guid.TryParse(azureAdSection["ClientId"], out _))
     // Microsoft.Identity.Web's default implicit id_token flow, which would require enabling ID-token
     // issuance on the blueprint app registration. Auth-code needs only the redirect URI + secret.
     builder.Services.Configure<OpenIdConnectOptions>(OpenIdConnectDefaults.AuthenticationScheme, o =>
-        o.ResponseType = "code");
+    {
+        o.ResponseType = "code";
+        // Let the ScreenshareController force the Entra account picker (prompt=select_account) when the
+        // signed-in opener is the wrong account — carry "prompt" from AuthenticationProperties into the
+        // outbound auth request, chaining Microsoft.Identity.Web's own redirect handler.
+        o.Events ??= new OpenIdConnectEvents();
+        var priorRedirect = o.Events.OnRedirectToIdentityProvider;
+        o.Events.OnRedirectToIdentityProvider = async ctx =>
+        {
+            if (priorRedirect is not null) await priorRedirect(ctx);
+            if (ctx.Properties.Items.TryGetValue("prompt", out var prompt) && !string.IsNullOrEmpty(prompt))
+                ctx.ProtocolMessage.Prompt = prompt;
+        };
+    });
 }
 
 // Conversation state. MemoryStorage is fine for development; for production use a durable

@@ -20,7 +20,7 @@ public sealed class ScreenshareService
     public string ViewerUrl => _options.ViewerUrl;
     public TimeSpan RedeemBy => TimeSpan.FromMinutes(_options.RedeemByMinutes);
 
-    /// <summary>Public HTTPS origin of paw's webapp (for the viewer link in the "Watch live" card); empty if unset.</summary>
+    /// <summary>Public HTTPS origin of the agent's webapp (for the viewer link in the "Watch live" card); empty if unset.</summary>
     public string PublicBaseUrl => _options.PublicBaseUrl?.TrimEnd('/') ?? "";
 
     /// <summary>Scopes for the ARI OBO exchange (audience/.default).</summary>
@@ -58,4 +58,9 @@ public sealed class ScreenshareService
         }
         catch { return null; }
     }
+
+    /// <summary>Mask an opaque ticket id for logging — first4…last4 only. The full id (plus being the
+    /// hirer) is enough to redeem, so full ids must never appear in logs.</summary>
+    public static string MaskTicket(string? ticketId) =>
+        string.IsNullOrEmpty(ticketId) || ticketId.Length <= 8 ? "****" : $"{ticketId[..4]}\u2026{ticketId[^4..]}";
 }

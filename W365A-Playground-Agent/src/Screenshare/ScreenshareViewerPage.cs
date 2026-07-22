@@ -121,7 +121,7 @@ internal static class ScreenshareViewerPage
               try {
                 const resp = await fetch('/api/screenshare/session', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ ticket }) });
                 if (resp.status === 401) { showPanel('Your sign-in has expired.', 'Sign in again', function () { location.reload(); }); return; }
-                if (resp.status === 403) { showPanel('You are not authorized to view this session.'); return; }
+                if (resp.status === 403) { showPanel('You are not authorized to view this session — you may be signed in with the wrong account.', 'Sign in with a different account', function () { location.href = '/screenshare/switch-account?ticket=' + encodeURIComponent(ticket); }); return; }
                 if (resp.status === 410) { showPanel('This live link has expired. Go back to Teams and ask the agent to share again.'); return; }
                 if (!resp.ok) { showPanel('Could not start the live view.'); return; }
                 session = await resp.json();

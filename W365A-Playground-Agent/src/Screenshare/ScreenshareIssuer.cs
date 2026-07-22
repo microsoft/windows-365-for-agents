@@ -54,13 +54,17 @@ public sealed class ScreenshareIssuer(
         var tokenExpiry = ScreenshareService.ReadExpiry(token);
         // Drop any superseded tickets for this session (expired/ended/revoked offers) before minting a
         // fresh one, so re-offers don't accumulate orphans in the in-memory store.
-        store.PurgeSupersededTickets(w365SessionId);
+        var purged = store.PurgeSupersededTickets(w365SessionId);
+        if (purged > 0)
+            logger.LogInformation("[Screenshare] purged {Count} superseded ticket(s) for session {Session}.", purged, w365SessionId);
         var ticket = store.Create(new NewTicket(
             computerUrl, token, svc.ViewerUrl, ShareMode.Interactive, ShareScope.SeeControl,
             conversationId, hirerOid, w365SessionId, svc.RedeemBy,
             svc.ComputeSessionUntil(now, tokenExpiry), tokenExpiry));
 
-        logger.LogInformation("[Screenshare] offer ticket created for session {Session}.", w365SessionId);
+        // hirer is the Entra object id (oid) — NEVER the UPN (compliance). Ticket id masked (first4…last4).
+        logger.LogInformation("[Screenshare] offer ticket created session={Session} ticket={Ticket} hirer={Hirer} scope={Scope} redeemByUtc={RedeemBy:o} untilUtc={Until:o}",
+            w365SessionId, ScreenshareService.MaskTicket(ticket.TicketId), hirerOid, ticket.Scope, ticket.RedeemByUtc, ticket.SessionUntilUtc);
         return ticket;
     }
 }

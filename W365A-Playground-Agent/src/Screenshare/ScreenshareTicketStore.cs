@@ -30,7 +30,6 @@ public sealed class ScreenshareTicketStore : IScreenshareTicketStore
             RedeemByUtc = now + spec.RedeemBy,
             SessionUntilUtc = spec.SessionUntilUtc,
             AriTokenExpiryUtc = spec.AriTokenExpiryUtc,
-            CardActivityId = spec.CardActivityId,
             Status = ShareStatus.Offered,
             LastHeartbeatAt = now,
         };

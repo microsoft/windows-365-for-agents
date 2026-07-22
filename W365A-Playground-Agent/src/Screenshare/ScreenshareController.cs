@@ -75,6 +75,21 @@ public sealed class ScreenshareController(
         return Content(ScreenshareViewerPage.Html, "text/html");
     }
 
+    [HttpGet("/screenshare/switch-account")]
+    public async Task<IActionResult> SwitchAccount([FromQuery] string? ticket)
+    {
+        var returnUrl = "/screenshare" + (string.IsNullOrEmpty(ticket) ? "" : $"?ticket={Uri.EscapeDataString(ticket)}");
+        if (IsDevBypass()) return Redirect(returnUrl);
+        // Clear the local cookie so the re-challenge can't silently reuse the wrong account, then force
+        // the Entra account picker so the opener can choose their hirer identity.
+        await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+        logger.LogInformation("[Screenshare] switch-account requested ticket={Ticket}",
+            string.IsNullOrEmpty(ticket) ? "(none)" : Mask(ticket));
+        var props = new AuthenticationProperties { RedirectUri = returnUrl };
+        props.Items["prompt"] = "select_account";
+        return Challenge(props, OpenIdConnectDefaults.AuthenticationScheme);
+    }
+
     [HttpPost("/api/screenshare/session")]
     public async Task<IActionResult> Redeem([FromBody] RedeemRequest? body, CancellationToken ct)
     {
@@ -181,6 +196,5 @@ public sealed class ScreenshareController(
     private bool IsDevBypass() =>
         env.IsDevelopment() && !string.IsNullOrWhiteSpace(_options.DevBypassOid);
 
-    private static string Mask(string ticket) =>
-        ticket.Length <= 8 ? "****" : $"{ticket[..4]}\u2026{ticket[^4..]}";
+    private static string Mask(string ticket) => ScreenshareService.MaskTicket(ticket);
 }

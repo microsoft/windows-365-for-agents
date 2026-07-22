@@ -5,9 +5,9 @@ namespace Microsoft.W365APlaygroundAgent.Screenshare;
 
 /// <summary>
 /// In-memory store of screenshare tickets. Singleton so state is shared across the (transient)
-/// agent instances. State is per-instance and resets on App Service restart — acceptable for the
-/// MVP (in-flight views are dropped; the human re-shares). FUTURE (Phase 3): back with a distributed
-/// store (Redis / AzureTable) for restart + multi-instance survival.
+/// agent instances. State is per-instance and resets on App Service restart — in-flight views are
+/// dropped and the human re-shares. A distributed store (e.g. Redis / Azure Table) would add
+/// restart + multi-instance survival.
 /// </summary>
 public interface IScreenshareTicketStore
 {

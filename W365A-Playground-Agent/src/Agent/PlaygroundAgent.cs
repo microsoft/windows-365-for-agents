@@ -39,10 +39,10 @@ public class PlaygroundAgent : AgentApplication
 
     Cloud PC (W365) usage:
     - To act on a Windows desktop (take a screenshot, click, type, open an app, browse the web), call mcp_W365ComputerUse_StartSession first.
+    - If StartSession fails, retry once. If it still fails, tell the user to check that the agent user is assigned to a valid agent pool.
     - Once a session is active you have a NATIVE computer-use capability: describe physical desktop actions naturally (click, double-click, type text, press keys, scroll, drag, take a screenshot, open a URL) and the system translates them into low-level desktop operations and feeds you back a screenshot automatically.
     - You ALSO have a small set of supplementary function tools for things the computer-use channel cannot do: execute_shell_command, execute_python_code, launch_application, list_processes/kill_process, list_windows, get_accessibility_tree, find_ui_element, analyze_screen, get_system_info, clipboard_read/clipboard_write. sessionId is auto-injected on all of these.
     - Call mcp_W365ComputerUse_EndSession when the user is finished.
-    - The human can watch (and take control of) the live Cloud PC via a "Watch live" card that is offered to them automatically whenever you do desktop work; you don't need to do anything to share it, and their closing the view does not end your session.
     """;
 
     private static string GetAgentInstructions(string? userName)
@@ -186,11 +186,9 @@ public class PlaygroundAgent : AgentApplication
 
             // Tenant allow-list gate (fail-closed): the screenshare feature is served ONLY to allow-listed
             // tenants — it is not multi-tenant ready yet (hirer resolution + the OIDC sign-in app are
-            // home-tenant scoped; AB#63169372). Callers from any other tenant get the normal flow (CUA work
+            // home-tenant scoped). Callers from any other tenant get the normal flow (CUA work
             // + forwarded screenshots) with NO "Watch live" card. Empty allow-list ⇒ nobody.
             var callerTenant = ResolveCallerTenantId(turnContext);
-            // [Screenshare][diag] TEMPORARY — surface the resolved tenant so cross-tenant claim values can be validated.
-            _logger.LogInformation("[Screenshare][diag] offer tenant check: resolved tenant={Tenant}.", callerTenant ?? "(unknown)");
             if (!IsScreenshareAllowedForTenant(callerTenant))
             {
                 _logger.LogInformation("[Screenshare] offer skipped: tenant {Tenant} not allow-listed.", callerTenant ?? "(unknown)");
@@ -209,7 +207,7 @@ public class PlaygroundAgent : AgentApplication
             if (string.IsNullOrEmpty(agentInstanceId)) return;
 
             Func<string[], CancellationToken, Task<string?>> mintAri = async (scopes, ct) =>
-                // exchangeConnection null is the verified value for the agentic ARI exchange (see wi-006 probe).
+                // exchangeConnection is null for the agentic ARI token exchange.
                 await UserAuthorization.ExchangeTurnTokenAsync(turnContext, authHandlerName!, exchangeConnection: null!, scopes, ct);
 
             var conversationId = turnContext.Activity?.Conversation?.Id ?? sessionId;
@@ -221,7 +219,7 @@ public class PlaygroundAgent : AgentApplication
             var maxSessionMinutes = _configuration.GetValue("Screenshare:MaxSessionMinutes", 120);
             var card = ScreenshareCardBuilder.BuildWatchLiveCard(viewerUrl, ticket.RedeemByUtc, ticket.AriTokenExpiryUtc, maxSessionMinutes);
             await turnContext.SendActivityAsync(MessageFactory.Attachment(card), cancellationToken);
-            _logger.LogInformation("[Screenshare] Watch-live card offered for session {Session}.", sessionId);
+            _logger.LogInformation("[Screenshare] Watch-live card offered for session {Session} (tenant {Tenant}).", sessionId, callerTenant ?? "(unknown)");
         }
         catch (Exception ex)
         {
