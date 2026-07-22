@@ -1483,7 +1483,6 @@ bool recovered = false;
         return false;
     }
 
-    /// <summary>Extracts and clears a pending screenshare offer for the conversation (post-turn). Null if none.</summary>
     /// <summary>Best-effort read of "screenShareUrl" from a StartSession result (top-level or nested).</summary>
     private static string? TryExtractScreenShareUrlFromResult(object? result)
     {
