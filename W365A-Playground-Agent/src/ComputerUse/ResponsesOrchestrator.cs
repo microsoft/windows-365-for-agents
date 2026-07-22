@@ -566,10 +566,18 @@ bool recovered = false;
             // to one attempt per turn so a failing mint (e.g. unresolved hirer) can't spam.
             if (!screenshareOfferAttempted && offerScreenshareAsync is not null)
             {
+                // EndSession is the sole CUA tool that must NOT (re)offer a card: the session is being
+                // torn down, so a fresh "Watch live" offer would point at a dying (or, with multiple
+                // sessions, an unrelated promoted) session. Suppress the offer whenever this iteration
+                // ended a session.
+                var endedSession = functionCalls.Any(fc => fc.TryGetProperty("name", out var n)
+                    && string.Equals(n.GetString(), W365EndSessionToolName, StringComparison.OrdinalIgnoreCase));
+
                 var cuaActivity = computerCalls.Count > 0
                     || functionCalls.Any(fc => fc.TryGetProperty("name", out var n) && n.GetString() is { } nm
                         && (W365LifecycleToolNames.Contains(nm) || W365SupplementaryDesktopTools.Contains(nm)));
-                if (cuaActivity
+                if (!endedSession
+                    && cuaActivity
                     && state.W365SessionId is { } offSid
                     && state.SessionScreenShareUrls.TryGetValue(offSid, out var offUrl)
                     && !_ticketStore.HasRedeemableTicket(offSid))
