@@ -12,6 +12,10 @@ public sealed class ScreenshareTicketStore : IScreenshareTicketStore
 {
     private readonly ConcurrentDictionary<string, ScreenshareTicket> _tickets = new(StringComparer.Ordinal);
 
+    // No background timer runs in this in-memory store, so expired tickets are reclaimed opportunistically:
+    // once the map grows past this many entries, Create() runs a full SweepExpired() pass.
+    private const int SweepThreshold = 100;
+
     public ScreenshareTicket Create(NewTicket spec)
     {
         var now = DateTimeOffset.UtcNow;
@@ -34,6 +38,12 @@ public sealed class ScreenshareTicketStore : IScreenshareTicketStore
             LastHeartbeatAt = now,
         };
         _tickets[ticket.TicketId] = ticket;
+
+        // Opportunistic cleanup (amortized): a full scan only fires on the rare insert that crosses the
+        // threshold, bounding the store to roughly the tickets created within one SessionUntil window.
+        if (_tickets.Count > SweepThreshold)
+            SweepExpired();
+
         return ticket;
     }
 
