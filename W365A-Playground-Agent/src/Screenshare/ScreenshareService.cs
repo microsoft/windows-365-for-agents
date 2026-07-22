@@ -40,7 +40,7 @@ public sealed class ScreenshareService
         return null;
     }
 
-    /// <summary>SessionUntil = min(now + MaxSession, bearer expiry) — the Strategy-A bound.</summary>
+    /// <summary>SessionUntil = min(now + MaxSession, bearer expiry).</summary>
     public DateTimeOffset ComputeSessionUntil(DateTimeOffset now, DateTimeOffset? bearerExpiry)
     {
         var policyMax = now.AddMinutes(_options.MaxSessionMinutes);
