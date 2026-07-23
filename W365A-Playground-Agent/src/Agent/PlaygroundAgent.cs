@@ -378,7 +378,7 @@ public class PlaygroundAgent : AgentApplication
             // StreamingResponse is only used for non-agentic (WebChat/Playground) turns; see useStreaming above.
             // On Teams the ack + typing loop handle the immediate UX and streaming is bypassed entirely.
             if (useStreaming)
-                await turnContext.StreamingResponse.QueueInformativeUpdateAsync("Just a moment please..").ConfigureAwait(false);
+                await turnContext.StreamingResponse.QueueInformativeUpdateAsync("Just a moment please...").ConfigureAwait(false);
             try
             {
                 var userText = turnContext.Activity.Text?.Trim() ?? string.Empty;
