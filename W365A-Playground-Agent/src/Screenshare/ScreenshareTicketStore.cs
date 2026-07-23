@@ -39,9 +39,9 @@ public sealed class ScreenshareTicketStore : IScreenshareTicketStore
         };
         _tickets[ticket.TicketId] = ticket;
 
-        // Opportunistic cleanup (amortized): a full scan only fires on the rare insert that crosses the
-        // threshold, bounding the store to roughly the tickets created within one SessionUntil window.
-        if (_tickets.Count > SweepThreshold)
+        // Opportunistic cleanup: SweepExpired() is a full scan, so throttle it (no background timer).
+        var count = _tickets.Count;
+        if (count > SweepThreshold && (count % (SweepThreshold / 10)) == 0)
             SweepExpired();
 
         return ticket;
