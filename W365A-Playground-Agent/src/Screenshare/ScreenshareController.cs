@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
+using System.Security.Cryptography;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
@@ -61,18 +62,19 @@ public sealed class ScreenshareController(
         var cdn = Uri.TryCreate(_options.ViewerUrl, UriKind.Absolute, out var v)
             ? v.GetLeftPart(UriPartial.Authority)
             : "https://packages.global.cloudinferenceplatform.azure.com";
+        var nonce = Convert.ToBase64String(RandomNumberGenerator.GetBytes(16));
         Response.Headers["Content-Security-Policy"] = string.Join("; ",
             "default-src 'self'",
             "frame-ancestors 'none'",
-            $"script-src 'self' 'unsafe-inline' {cdn}",
+            $"script-src 'self' 'nonce-{nonce}' {cdn}",
             $"frame-src {cdn}",
-            "style-src 'self' 'unsafe-inline'",
+            $"style-src 'self' 'nonce-{nonce}'",
             "img-src 'self' data:",
             "connect-src 'self'");
         Response.Headers["X-Frame-Options"] = "DENY";
         Response.Headers["X-Content-Type-Options"] = "nosniff";
         Response.Headers["Referrer-Policy"] = "no-referrer";
-        return Content(ScreenshareViewerPage.Html, "text/html");
+        return Content(ScreenshareViewerPage.Render(nonce), "text/html");
     }
 
     [HttpGet("/screenshare/switch-account")]

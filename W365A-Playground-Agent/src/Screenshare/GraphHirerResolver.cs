@@ -74,9 +74,12 @@ public sealed class GraphHirerResolver : IHirerResolver
             using var resp = await http.SendAsync(req, ct);
             if (!resp.IsSuccessStatusCode)
             {
+                var status = (int)resp.StatusCode;
                 _logger.LogWarning("GraphHirerResolver: owners lookup for {Instance} returned {Status}.",
-                    agentInstanceId, (int)resp.StatusCode);
-                return CacheAndReturn(agentInstanceId, null);
+                    agentInstanceId, status);
+                // Don't cache the negative result on transient failures (throttling / server errors) so a
+                // later offer can retry; only cache null for definitive client errors (e.g. 403/404).
+                return IsTransientStatus(status) ? null : CacheAndReturn(agentInstanceId, null);
             }
 
             await using var stream = await resp.Content.ReadAsStreamAsync(ct);
@@ -109,6 +112,11 @@ public sealed class GraphHirerResolver : IHirerResolver
         _cache[key] = (oid, DateTimeOffset.UtcNow + CacheTtl);
         return oid;
     }
+
+    // Transient Graph failures (request timeout, throttling, server errors) shouldn't be cached as a
+    // negative result — a later offer should be free to retry rather than fail closed for the full TTL.
+    private static bool IsTransientStatus(int status) =>
+        status is 408 or 429 || status >= 500;
 
     private static string? ExtractTenantId(string? authority) =>
         Uri.TryCreate(authority, UriKind.Absolute, out var u) && u.Segments.Length > 1

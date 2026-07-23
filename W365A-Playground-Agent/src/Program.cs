@@ -84,9 +84,9 @@ if (Guid.TryParse(azureAdSection["ClientId"], out _))
 {
     builder.Services.AddAuthentication()
         .AddMicrosoftIdentityWebApp(azureAdSection);
-    // Force the authorization-code flow (code redeemed server-side with the client secret) instead of
-    // Microsoft.Identity.Web's default implicit id_token flow, which would require enabling ID-token
-    // issuance on the blueprint app registration. Auth-code needs only the redirect URI + secret.
+    // Explicitly use the authorization-code flow (code redeemed server-side with the client secret) so the
+    // blueprint app registration doesn't need implicit ID-token issuance enabled — auth-code needs only the
+    // redirect URI + secret. Set explicitly rather than relying on the handler's default response_type.
     builder.Services.Configure<OpenIdConnectOptions>(OpenIdConnectDefaults.AuthenticationScheme, o =>
     {
         o.ResponseType = "code";

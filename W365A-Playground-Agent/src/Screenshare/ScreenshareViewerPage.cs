@@ -14,7 +14,7 @@ namespace Microsoft.W365APlaygroundAgent.Screenshare;
 /// </summary>
 internal static class ScreenshareViewerPage
 {
-    public const string Html =
+    private const string Template =
         """
         <!DOCTYPE html>
         <html lang="en">
@@ -22,7 +22,7 @@ internal static class ScreenshareViewerPage
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Cloud PC — Live View</title>
-        <style>
+        <style nonce="%NONCE%">
           html,body{margin:0;height:100%;font-family:'Segoe UI',system-ui,sans-serif;background:#1b1a19;color:#f3f2f1;overflow:hidden;}
           #bar{height:44px;display:flex;align-items:center;gap:8px;padding:0 12px;background:#252423;border-bottom:1px solid #3b3a39;box-sizing:border-box;}
           #status{font-size:13px;display:inline-flex;align-items:center;}
@@ -34,20 +34,22 @@ internal static class ScreenshareViewerPage
           #stage{position:absolute;top:44px;bottom:0;left:0;right:0;background:#000;}
           #panel{position:absolute;top:44px;left:0;right:0;bottom:0;display:none;align-items:center;justify-content:center;flex-direction:column;gap:14px;text-align:center;padding:24px;box-sizing:border-box;}
           #panelText{font-size:15px;max-width:420px;}
+          .spacer{flex:1;}
+          .hidden{display:none;}
         </style>
         </head>
         <body>
           <div id="bar">
             <span id="status"><span class="dot" id="dot"></span><span id="statusText">starting…</span></span>
-            <span style="flex:1"></span>
+            <span class="spacer"></span>
             <button id="takeBtn" disabled>Take control</button>
             <button id="releaseBtn" disabled>Release</button>
             <button id="stopBtn" class="danger" disabled>Stop</button>
           </div>
           <div id="stage"></div>
-          <div id="panel"><div id="panelText"></div><button id="panelBtn" style="display:none"></button></div>
+          <div id="panel"><div id="panelText"></div><button id="panelBtn" class="hidden"></button></div>
 
-          <script>
+          <script nonce="%NONCE%">
           (function () {
             const $ = id => document.getElementById(id);
             const ticket = new URLSearchParams(location.search).get('ticket');
@@ -155,4 +157,7 @@ internal static class ScreenshareViewerPage
         </body>
         </html>
         """;
+
+    /// <summary>Renders the viewer HTML with the per-request CSP nonce injected into the inline style/script tags.</summary>
+    public static string Render(string nonce) => Template.Replace("%NONCE%", nonce);
 }
