@@ -1,11 +1,9 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-using Microsoft.W365APlaygroundAgent.ComputerUse;
-using Microsoft.W365APlaygroundAgent.Screenshare;
-using Microsoft.W365APlaygroundAgent.Telemetry;
-using Microsoft.W365APlaygroundAgent.Telemetry.AgentEnrichment;
-using Microsoft.W365APlaygroundAgent.Throttling;
+using System.Collections.Concurrent;
+using System.Text.Json;
+
 using Microsoft.Agents.A365.Runtime.Utils;
 using Microsoft.Agents.A365.Tooling.Extensions.AgentFramework.Services;
 using Microsoft.Agents.Builder;
@@ -14,8 +12,11 @@ using Microsoft.Agents.Builder.State;
 using Microsoft.Agents.Core;
 using Microsoft.Agents.Core.Models;
 using Microsoft.Extensions.AI;
-using System.Collections.Concurrent;
-using System.Text.Json;
+using Microsoft.W365APlaygroundAgent.ComputerUse;
+using Microsoft.W365APlaygroundAgent.Screenshare;
+using Microsoft.W365APlaygroundAgent.Telemetry;
+using Microsoft.W365APlaygroundAgent.Telemetry.AgentEnrichment;
+using Microsoft.W365APlaygroundAgent.Throttling;
 
 namespace Microsoft.W365APlaygroundAgent.Agent;
 
@@ -54,8 +55,16 @@ public class PlaygroundAgent : AgentApplication
         // Strip control characters (newlines, tabs, etc.) that could break prompt structure
         safe = System.Text.RegularExpressions.Regex.Replace(safe, @"[\p{Cc}\p{Cf}]", " ").Trim();
         // Enforce a reasonable max length
-        if (safe.Length > 64) safe = safe[..64].TrimEnd();
-        if (string.IsNullOrWhiteSpace(safe)) safe = "unknown";
+        if (safe.Length > 64)
+        {
+            safe = safe[..64].TrimEnd();
+        }
+
+        if (string.IsNullOrWhiteSpace(safe))
+        {
+            safe = "unknown";
+        }
+
         return AgentInstructionsTemplate.Replace("{userName}", safe, StringComparison.Ordinal);
     }
 
@@ -100,11 +109,19 @@ public class PlaygroundAgent : AgentApplication
     /// <summary>Best-effort decode of a JWT's <c>exp</c> claim (Unix seconds). Null if not a JWT.</summary>
     private static long? TryGetJwtExp(string? token)
     {
-        if (string.IsNullOrEmpty(token)) return null;
+        if (string.IsNullOrEmpty(token))
+        {
+            return null;
+        }
+
         try
         {
             var parts = token.Split('.');
-            if (parts.Length < 2) return null;
+            if (parts.Length < 2)
+            {
+                return null;
+            }
+
             var p = parts[1].Replace('-', '+').Replace('_', '/');
             switch (p.Length % 4) { case 2: p += "=="; break; case 3: p += "="; break; }
             using var doc = JsonDocument.Parse(Convert.FromBase64String(p));
@@ -183,7 +200,10 @@ public class PlaygroundAgent : AgentApplication
         try
         {
             // ARI mint requires the agentic auth handler, so only offer on agentic turns.
-            if (!turnContext.IsAgenticRequest() || string.IsNullOrEmpty(authHandlerName)) return;
+            if (!turnContext.IsAgenticRequest() || string.IsNullOrEmpty(authHandlerName))
+            {
+                return;
+            }
 
             // Tenant allow-list gate (fail-closed): the screenshare feature is served ONLY to allow-listed
             // tenants — it is not multi-tenant ready yet (hirer resolution + the OIDC sign-in app are
@@ -205,7 +225,10 @@ public class PlaygroundAgent : AgentApplication
             }
 
             var agentInstanceId = turnContext.Activity?.GetAgenticInstanceId();
-            if (string.IsNullOrEmpty(agentInstanceId)) return;
+            if (string.IsNullOrEmpty(agentInstanceId))
+            {
+                return;
+            }
 
             Func<string[], CancellationToken, Task<string?>> mintAri = async (scopes, ct) =>
                 // exchangeConnection is null for the agentic ARI token exchange.
@@ -214,7 +237,10 @@ public class PlaygroundAgent : AgentApplication
             var conversationId = turnContext.Activity?.Conversation?.Id ?? sessionId;
             var ticket = await _screenshareIssuer.CreateOfferAsync(
                 mintAri, agentInstanceId, conversationId, screenShareUrl, sessionId, cancellationToken);
-            if (ticket is null) return;
+            if (ticket is null)
+            {
+                return;
+            }
 
             var viewerUrl = $"{baseUrl}/screenshare?ticket={Uri.EscapeDataString(ticket.TicketId)}";
             var maxSessionMinutes = _configuration.GetValue("Screenshare:MaxSessionMinutes", 120);
@@ -235,7 +261,11 @@ public class PlaygroundAgent : AgentApplication
         var identity = turnContext.Identity as System.Security.Claims.ClaimsIdentity;
         var tid = identity?.FindFirst("tid")?.Value
             ?? identity?.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
-        if (!string.IsNullOrEmpty(tid)) return tid;
+        if (!string.IsNullOrEmpty(tid))
+        {
+            return tid;
+        }
+
         return turnContext.Activity?.Conversation?.TenantId
             ?? turnContext.Activity?.Recipient?.TenantId;
     }
@@ -244,11 +274,23 @@ public class PlaygroundAgent : AgentApplication
     /// <c>Screenshare:AllowedTenantIds</c> receive the "Watch live" card. Empty/unset list ⇒ nobody.</summary>
     private bool IsScreenshareAllowedForTenant(string? tenantId)
     {
-        if (string.IsNullOrEmpty(tenantId)) return false;
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return false;
+        }
+
         var allowed = _configuration.GetSection("Screenshare:AllowedTenantIds").Get<string[]>();
         if (allowed is { Length: > 0 })
+        {
             foreach (var t in allowed)
-                if (string.Equals(t, tenantId, StringComparison.OrdinalIgnoreCase)) return true;
+            {
+                if (string.Equals(t, tenantId, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+        }
+
         return false;
     }
 
@@ -287,7 +329,9 @@ public class PlaygroundAgent : AgentApplication
             {
                 var revoked = _ticketStore.RevokeByConversation(conversationId);
                 if (revoked > 0)
+                {
                     _logger.LogInformation("[Screenshare] Uninstall revoked {Count} live view(s) for conversation.", revoked);
+                }
             }
             await turnContext.SendActivityAsync(MessageFactory.Text(AgentFarewellMessage), cancellationToken);
         }
@@ -378,7 +422,10 @@ public class PlaygroundAgent : AgentApplication
             // StreamingResponse is only used for non-agentic (WebChat/Playground) turns; see useStreaming above.
             // On Teams the ack + typing loop handle the immediate UX and streaming is bypassed entirely.
             if (useStreaming)
+            {
                 await turnContext.StreamingResponse.QueueInformativeUpdateAsync("Just a moment please...").ConfigureAwait(false);
+            }
+
             try
             {
                 var userText = turnContext.Activity.Text?.Trim() ?? string.Empty;
@@ -424,7 +471,9 @@ await _orchestrator.RunAsync(conversationKey, userText, GetAgentInstructions(dis
                     // Expected: typingTask is canceled when typingCts is canceled; no further action required.
                 }
                 if (useStreaming)
+                {
                     await turnContext.StreamingResponse.EndStreamAsync(cancellationToken).ConfigureAwait(false);
+                }
             }
             turn.SetSuccess(true);
         }
@@ -502,8 +551,10 @@ await _orchestrator.RunAsync(conversationKey, userText, GetAgentInstructions(dis
                     // Cache miss or forced (401 recovery): drop any existing entry so we
                     // re-enumerate with a fresh transport token.
                     if (_agentToolCache.TryRemove(toolCacheKey, out _))
+                    {
                         _logger.LogInformation("Tool cache evicted for re-enumeration (key={Key}, reason={Reason}).",
                             toolCacheKey, forceRefresh ? "forceRefresh(401)" : "cache-miss-or-empty");
+                    }
 
                     // Signal 2: did this forced re-enumeration mint a fresh token?
                     if (forceRefresh)
@@ -513,7 +564,10 @@ await _orchestrator.RunAsync(conversationKey, userText, GetAgentInstructions(dis
                         if (newExp is long exp)
                         {
                             if (_lastTokenExpByCacheKey.TryGetValue(toolCacheKey, out var prev))
+                            {
                                 _lastForceRefreshTokenRefreshed = exp > prev;
+                            }
+
                             _lastTokenExpByCacheKey[toolCacheKey] = exp;
                         }
                         _logger.LogInformation("MCP401Classification-Signal2 key={Key} tokenRefreshed={Refreshed}.",
@@ -521,7 +575,9 @@ await _orchestrator.RunAsync(conversationKey, userText, GetAgentInstructions(dis
                     }
 
                     if (!context.IsAgenticRequest())
+                    {
                         await context.StreamingResponse.QueueInformativeUpdateAsync("Loading tools...");
+                    }
 
                     // For the bearer token (development) flow, pass the token as an override and
                     // use the OBO handler (or fall back to the agentic handler) as the handler.

@@ -42,7 +42,9 @@ public sealed class ScreenshareTicketStore : IScreenshareTicketStore
         // Opportunistic cleanup: SweepExpired() is a full scan, so throttle it (no background timer).
         var count = _tickets.Count;
         if (count > SweepThreshold && (count % (SweepThreshold / 10)) == 0)
+        {
             SweepExpired();
+        }
 
         return ticket;
     }
@@ -53,13 +55,18 @@ public sealed class ScreenshareTicketStore : IScreenshareTicketStore
     public RedeemOutcome Redeem(string ticketId, string openerOid, string? existingCookieId)
     {
         if (!_tickets.TryGetValue(ticketId, out var t))
+        {
             return RedeemOutcome.Fail(RedeemFailure.NotFound);
+        }
 
         lock (t)
         {
             var now = DateTimeOffset.UtcNow;
             if (t.Status is ShareStatus.Revoked or ShareStatus.Ended)
+            {
                 return RedeemOutcome.Fail(RedeemFailure.Revoked);
+            }
+
             if (now > t.SessionUntilUtc)
             {
                 t.Status = ShareStatus.Expired;
@@ -67,7 +74,9 @@ public sealed class ScreenshareTicketStore : IScreenshareTicketStore
             }
             // The interactive sign-in is the authoritative gate: the opener must be the bound hirer.
             if (!string.Equals(openerOid, t.HumanOid, StringComparison.OrdinalIgnoreCase))
+            {
                 return RedeemOutcome.Fail(RedeemFailure.WrongHuman);
+            }
 
             if (t.Status == ShareStatus.Offered)
             {
@@ -90,19 +99,35 @@ public sealed class ScreenshareTicketStore : IScreenshareTicketStore
     public void SetStatus(string ticketId, ShareStatus status)
     {
         if (_tickets.TryGetValue(ticketId, out var t))
-            lock (t) { if (t.Status is not (ShareStatus.Revoked or ShareStatus.Ended)) t.Status = status; }
+        {
+            lock (t) { if (t.Status is not (ShareStatus.Revoked or ShareStatus.Ended))
+                {
+                    t.Status = status;
+                }
+            }
+        }
     }
 
     public void Heartbeat(string ticketId)
     {
         if (_tickets.TryGetValue(ticketId, out var t))
-            lock (t) t.LastHeartbeatAt = DateTimeOffset.UtcNow;
+        {
+            lock (t)
+            {
+                t.LastHeartbeatAt = DateTimeOffset.UtcNow;
+            }
+        }
     }
 
     public void Revoke(string ticketId)
     {
         if (_tickets.TryGetValue(ticketId, out var t))
-            lock (t) t.Status = ShareStatus.Revoked;
+        {
+            lock (t)
+            {
+                t.Status = ShareStatus.Revoked;
+            }
+        }
     }
 
     public int RevokeBySession(string w365SessionId) => RevokeWhere(t =>
@@ -116,7 +141,13 @@ public sealed class ScreenshareTicketStore : IScreenshareTicketStore
         var now = DateTimeOffset.UtcNow;
         var removed = 0;
         foreach (var kvp in _tickets)
-            if (now > kvp.Value.SessionUntilUtc && _tickets.TryRemove(kvp.Key, out _)) removed++;
+        {
+            if (now > kvp.Value.SessionUntilUtc && _tickets.TryRemove(kvp.Key, out _))
+            {
+                removed++;
+            }
+        }
+
         return removed;
     }
 
@@ -125,10 +156,18 @@ public sealed class ScreenshareTicketStore : IScreenshareTicketStore
         var now = DateTimeOffset.UtcNow;
         foreach (var t in _tickets.Values)
         {
-            if (!string.Equals(t.W365SessionId, w365SessionId, StringComparison.OrdinalIgnoreCase)) continue;
+            if (!string.Equals(t.W365SessionId, w365SessionId, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
             lock (t)
             {
-                if (now > t.SessionUntilUtc) continue;
+                if (now > t.SessionUntilUtc)
+                {
+                    continue;
+                }
+
                 switch (t.Status)
                 {
                     case ShareStatus.Redeemed:
@@ -149,10 +188,21 @@ public sealed class ScreenshareTicketStore : IScreenshareTicketStore
         foreach (var kvp in _tickets)
         {
             var t = kvp.Value;
-            if (!string.Equals(t.W365SessionId, w365SessionId, StringComparison.OrdinalIgnoreCase)) continue;
+            if (!string.Equals(t.W365SessionId, w365SessionId, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
             bool active;
-            lock (t) active = t.Status is ShareStatus.Redeemed or ShareStatus.Live or ShareStatus.Controlling;
-            if (!active && _tickets.TryRemove(kvp.Key, out _)) removed++;
+            lock (t)
+            {
+                active = t.Status is ShareStatus.Redeemed or ShareStatus.Live or ShareStatus.Controlling;
+            }
+
+            if (!active && _tickets.TryRemove(kvp.Key, out _))
+            {
+                removed++;
+            }
         }
         return removed;
     }
@@ -161,7 +211,13 @@ public sealed class ScreenshareTicketStore : IScreenshareTicketStore
     {
         var n = 0;
         foreach (var t in _tickets.Values)
-            if (predicate(t)) lock (t) { t.Status = ShareStatus.Revoked; n++; }
+        {
+            if (predicate(t))
+            {
+                lock (t) { t.Status = ShareStatus.Revoked; n++; }
+            }
+        }
+
         return n;
     }
 

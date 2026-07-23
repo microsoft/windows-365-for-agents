@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using Microsoft.Extensions.DependencyInjection;
+
 using OpenTelemetry.Metrics;
 
 namespace Microsoft.W365APlaygroundAgent.Telemetry.AgentEnrichment;

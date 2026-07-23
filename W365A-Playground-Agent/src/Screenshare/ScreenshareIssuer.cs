@@ -56,7 +56,10 @@ public sealed class ScreenshareIssuer(
         // fresh one, so re-offers don't accumulate orphans in the in-memory store.
         var purged = store.PurgeSupersededTickets(w365SessionId);
         if (purged > 0)
+        {
             logger.LogInformation("[Screenshare] purged {Count} superseded ticket(s) for session {Session}.", purged, w365SessionId);
+        }
+
         var ticket = store.Create(new NewTicket(
             computerUrl, token, svc.ViewerUrl, ShareMode.Interactive, ShareScope.SeeControl,
             conversationId, hirerOid, w365SessionId, svc.RedeemBy,

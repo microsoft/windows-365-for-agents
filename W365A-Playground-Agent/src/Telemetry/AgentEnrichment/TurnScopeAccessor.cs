@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using System.Security.Claims;
+
 using Microsoft.Agents.Builder;
 
 namespace Microsoft.W365APlaygroundAgent.Telemetry.AgentEnrichment;
@@ -72,7 +73,7 @@ internal sealed class TurnScopeAccessor : ITurnScopeAccessor
         var scope = new TurnScope(_meter, tags, _loggerFactory.CreateLogger("AgentTurn"));
         // Push/pop: restore the previous ambient on dispose, but only if this scope is still current
         // (guards against out-of-order disposal on the same async flow).
-        scope.OnDisposed = () => { if (ReferenceEquals(_current.Value, scope)) _current.Value = previous; };
+        scope.OnDisposed = () => { if (ReferenceEquals(_current.Value, scope)) { _current.Value = previous; } };
         _current.Value = scope;
         return scope;
     }
@@ -145,8 +146,16 @@ internal sealed class TurnScopeAccessor : ITurnScopeAccessor
     // channel-scoped non-directory id as identity).
     private static string? ResolveDirectoryObjectId(string? aadObjectId, string? channelAccountId)
     {
-        if (!string.IsNullOrEmpty(aadObjectId)) return aadObjectId;
-        if (string.IsNullOrEmpty(channelAccountId)) return null;
+        if (!string.IsNullOrEmpty(aadObjectId))
+        {
+            return aadObjectId;
+        }
+
+        if (string.IsNullOrEmpty(channelAccountId))
+        {
+            return null;
+        }
+
         const string OrgIdPrefix = "8:orgid:";
         var id = channelAccountId.StartsWith(OrgIdPrefix, StringComparison.OrdinalIgnoreCase)
             ? channelAccountId[OrgIdPrefix.Length..] : channelAccountId;
@@ -157,7 +166,10 @@ internal sealed class TurnScopeAccessor : ITurnScopeAccessor
     {
         foreach (var v in values)
         {
-            if (!string.IsNullOrEmpty(v)) return v;
+            if (!string.IsNullOrEmpty(v))
+            {
+                return v;
+            }
         }
         return null;
     }
