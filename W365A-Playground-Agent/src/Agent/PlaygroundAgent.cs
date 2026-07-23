@@ -340,6 +340,12 @@ public class PlaygroundAgent : AgentApplication
         // Agentic requests use the agentic auth handler; everything else (Playground, WebChat) uses OBO.
         var authHandlerName = turnContext.IsAgenticRequest() ? _agenticAuthHandlerName : _oboAuthHandlerName;
 
+        // Teams streaming allows only ONE uninterrupted stream per chat, but CUA turns interleave separate
+        // messages (screenshots, the screenshare card, typing pings) and run long — which makes Teams stop
+        // the stream ("This response was stopped") and drop the final answer. So on agentic (Teams) turns we
+        // don't stream: model text is sent as normal messages instead. Streaming stays for non-agentic (WebChat).
+        var useStreaming = !turnContext.IsAgenticRequest();
+
         using var turn = _turnScopes.BeginTurn(turnContext);
         try
         {
@@ -368,9 +374,10 @@ public class PlaygroundAgent : AgentApplication
                 catch (OperationCanceledException) { /* expected on cancel */ }
             }, typingCts.Token);
 
-            // StreamingResponse is best-effort: in Teams with agentic identity the SDK may buffer/downscale it.
-            // The ack + typing loop above handle the immediate UX; streaming remains for non-Teams / WebChat clients.
-            await turnContext.StreamingResponse.QueueInformativeUpdateAsync("Just a moment please..").ConfigureAwait(false);
+            // StreamingResponse is only used for non-agentic (WebChat/Playground) turns; see useStreaming above.
+            // On Teams the ack + typing loop handle the immediate UX and streaming is bypassed entirely.
+            if (useStreaming)
+                await turnContext.StreamingResponse.QueueInformativeUpdateAsync("Just a moment please..").ConfigureAwait(false);
             try
             {
                 var userText = turnContext.Activity.Text?.Trim() ?? string.Empty;
@@ -415,7 +422,8 @@ await _orchestrator.RunAsync(conversationKey, userText, GetAgentInstructions(dis
                 {
                     // Expected: typingTask is canceled when typingCts is canceled; no further action required.
                 }
-                await turnContext.StreamingResponse.EndStreamAsync(cancellationToken).ConfigureAwait(false);
+                if (useStreaming)
+                    await turnContext.StreamingResponse.EndStreamAsync(cancellationToken).ConfigureAwait(false);
             }
             turn.SetSuccess(true);
         }
@@ -511,7 +519,8 @@ await _orchestrator.RunAsync(conversationKey, userText, GetAgentInstructions(dis
                             toolCacheKey, _lastForceRefreshTokenRefreshed?.ToString() ?? "unknown");
                     }
 
-                    await context.StreamingResponse.QueueInformativeUpdateAsync("Loading tools...");
+                    if (!context.IsAgenticRequest())
+                        await context.StreamingResponse.QueueInformativeUpdateAsync("Loading tools...");
 
                     // For the bearer token (development) flow, pass the token as an override and
                     // use the OBO handler (or fall back to the agentic handler) as the handler.

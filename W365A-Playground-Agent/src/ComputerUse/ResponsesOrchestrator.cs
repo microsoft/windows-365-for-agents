@@ -416,6 +416,11 @@ public sealed class ResponsesOrchestrator
         // At most one "Watch live" auto-offer attempt per turn (a failed mint must not spam).
         var screenshareOfferAttempted = false;
 
+        // Agentic (Teams) turns don't use StreamingResponse — CUA interleaves separate messages and runs
+        // long, which makes Teams stop the stream and drop the answer. Send model text as normal messages
+        // instead; keep true streaming for non-agentic (WebChat/Playground).
+        var streamTextToClient = !turnContext.IsAgenticRequest();
+
         // The agent loop — the canonical pattern: call model → stream text → execute any tool
         // calls the model requested → repeat until the model returns a message with no further
         // tool calls. Each iteration sends the full history (model is stateless).
@@ -462,7 +467,12 @@ public sealed class ResponsesOrchestrator
                 {
                     var text = ExtractMessageText(item);
                     if (!string.IsNullOrEmpty(text))
-                        turnContext.StreamingResponse.QueueTextChunk(text);
+                    {
+                        if (streamTextToClient)
+                            turnContext.StreamingResponse.QueueTextChunk(text);
+                        else
+                            await turnContext.SendActivityAsync(MessageFactory.Text(text), cancellationToken);
+                    }
                 }
                 else if (type == "function_call")
                 {
