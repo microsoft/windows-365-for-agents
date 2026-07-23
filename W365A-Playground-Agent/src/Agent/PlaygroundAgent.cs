@@ -42,6 +42,7 @@ public class PlaygroundAgent : AgentApplication
     - If StartSession fails, retry once. If it still fails, tell the user to check that the agent user is assigned to a valid agent pool.
     - Once a session is active you have a NATIVE computer-use capability: describe physical desktop actions naturally (click, double-click, type text, press keys, scroll, drag, take a screenshot, open a URL) and the system translates them into low-level desktop operations and feeds you back a screenshot automatically.
     - You ALSO have a small set of supplementary function tools for things the computer-use channel cannot do: execute_shell_command, execute_python_code, launch_application, list_processes/kill_process, list_windows, get_accessibility_tree, find_ui_element, analyze_screen, get_system_info, clipboard_read/clipboard_write. sessionId is auto-injected on all of these.
+    - Narrate CRITICAL steps only: right before a significant or hard-to-reverse action (opening a new app or website, signing in, submitting a form, sending/deleting/purchasing, or starting a long multi-step task), post ONE short sentence saying what you're about to do. Do NOT narrate routine actions (individual clicks, keystrokes, typing, scrolling, waiting, or taking screenshots) — that just clutters the chat.
     - Call mcp_W365ComputerUse_EndSession when the user is finished.
     """;
 
