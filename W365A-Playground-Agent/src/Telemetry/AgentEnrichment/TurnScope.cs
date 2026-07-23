@@ -81,17 +81,37 @@ public sealed class TurnScope : IDisposable
 
     // ---- called by business logic (thin, intent-revealing) -------------------------------
 
-    public void SetAgentUser(string? agentUser) { if (!string.IsNullOrEmpty(agentUser)) Tags.AgentUser = agentUser; }
+    public void SetAgentUser(string? agentUser) { if (!string.IsNullOrEmpty(agentUser))
+        {
+            Tags.AgentUser = agentUser;
+        }
+    }
 
-    public void SetUserOid(string? oid) { if (!string.IsNullOrEmpty(oid)) Tags.UserOid = oid; }
+    public void SetUserOid(string? oid) { if (!string.IsNullOrEmpty(oid))
+        {
+            Tags.UserOid = oid;
+        }
+    }
 
-    public void SetModel(string? model) { if (!string.IsNullOrEmpty(model)) _model = model!; }
+    public void SetModel(string? model) { if (!string.IsNullOrEmpty(model))
+        {
+            _model = model!;
+        }
+    }
 
     /// <summary>Selected/active W365 session for this turn (latest wins if it switches mid-turn).</summary>
-    public void SetSessionId(string? sessionId) { if (!string.IsNullOrEmpty(sessionId)) Tags.SessionId = sessionId; }
+    public void SetSessionId(string? sessionId) { if (!string.IsNullOrEmpty(sessionId))
+        {
+            Tags.SessionId = sessionId;
+        }
+    }
 
     /// <summary>Distinct W365 sessions this turn has touched (event-only).</summary>
-    public void SetSessionCount(int count) { if (count > 0) Tags.SessionCount = count; }
+    public void SetSessionCount(int count) { if (count > 0)
+        {
+            Tags.SessionCount = count;
+        }
+    }
 
     /// <summary>Records one LLM round-trip's usage. cached/reasoning are event-only extras (subsets of input/output).</summary>
     public void RecordModelRoundtrip(int inputTokens, int outputTokens, string? model = null, int cachedTokens = 0, int reasoningTokens = 0)
@@ -101,7 +121,11 @@ public sealed class TurnScope : IDisposable
         _outputTokens += outputTokens;
         _cachedTokens += cachedTokens;
         _reasoningTokens += reasoningTokens;
-        if (!string.IsNullOrEmpty(model)) _model = model!;
+        if (!string.IsNullOrEmpty(model))
+        {
+            _model = model!;
+        }
+
         _meter.RecordRoundtripTokens(inputTokens, outputTokens, _model);
     }
 
@@ -109,8 +133,16 @@ public sealed class TurnScope : IDisposable
     public void RecordToolCall(string server, string tool, ToolKind kind, bool success, double durationMs)
     {
         _mcpToolCalls++;
-        if (!success) _mcpToolCallFailures++;
-        if (kind.IsCua()) _isCua = true;
+        if (!success)
+        {
+            _mcpToolCallFailures++;
+        }
+
+        if (kind.IsCua())
+        {
+            _isCua = true;
+        }
+
         _meter.RecordToolCall(ToolNameOf(server, tool), kind.ToDimValue(), success, durationMs);
     }
 
@@ -122,8 +154,16 @@ public sealed class TurnScope : IDisposable
     // (unresolved tools are rejected before invocation), so the set is naturally bounded.
     private static string ToolNameOf(string server, string tool)
     {
-        if (string.IsNullOrEmpty(server)) server = "unknown";
-        if (string.IsNullOrEmpty(tool)) tool = "unknown";
+        if (string.IsNullOrEmpty(server))
+        {
+            server = "unknown";
+        }
+
+        if (string.IsNullOrEmpty(tool))
+        {
+            tool = "unknown";
+        }
+
         return $"{server}/{tool}";
     }
 
@@ -131,7 +171,11 @@ public sealed class TurnScope : IDisposable
 
     public void Dispose()
     {
-        if (_disposed) return;
+        if (_disposed)
+        {
+            return;
+        }
+
         _disposed = true;
 
         try

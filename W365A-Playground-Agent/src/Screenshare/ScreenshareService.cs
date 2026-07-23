@@ -32,11 +32,21 @@ public sealed class ScreenshareService
     /// </summary>
     public static string? DeriveComputerUrl(string? screenShareUrl)
     {
-        if (string.IsNullOrWhiteSpace(screenShareUrl)) return null;
+        if (string.IsNullOrWhiteSpace(screenShareUrl))
+        {
+            return null;
+        }
+
         if (screenShareUrl.Contains("/screenshare?", StringComparison.OrdinalIgnoreCase))
+        {
             return screenShareUrl.Replace("/screenshare?", "?", StringComparison.OrdinalIgnoreCase);
+        }
+
         if (screenShareUrl.EndsWith("/screenshare", StringComparison.OrdinalIgnoreCase))
+        {
             return screenShareUrl[..^"/screenshare".Length];
+        }
+
         return null;
     }
 
@@ -50,7 +60,11 @@ public sealed class ScreenshareService
     /// <summary>Read the "exp" claim from a JWT bearer, or null if it can't be parsed.</summary>
     public static DateTimeOffset? ReadExpiry(string? jwt)
     {
-        if (string.IsNullOrWhiteSpace(jwt)) return null;
+        if (string.IsNullOrWhiteSpace(jwt))
+        {
+            return null;
+        }
+
         try
         {
             var t = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler().ReadJwtToken(jwt);

@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using System.Security.Cryptography;
+
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
@@ -81,7 +82,10 @@ public sealed class ScreenshareController(
     public async Task<IActionResult> SwitchAccount([FromQuery] string? ticket)
     {
         var returnUrl = "/screenshare" + (string.IsNullOrEmpty(ticket) ? "" : $"?ticket={Uri.EscapeDataString(ticket)}");
-        if (IsDevBypass()) return Redirect(returnUrl);
+        if (IsDevBypass())
+        {
+            return Redirect(returnUrl);
+        }
         // Clear the local cookie so the re-challenge can't silently reuse the wrong account, then force
         // the Entra account picker so the opener can choose their hirer identity.
         await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
@@ -95,7 +99,11 @@ public sealed class ScreenshareController(
     [HttpPost("/api/screenshare/session")]
     public async Task<IActionResult> Redeem([FromBody] RedeemRequest? body, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(body?.Ticket)) return BadRequest();
+        if (string.IsNullOrWhiteSpace(body?.Ticket))
+        {
+            return BadRequest();
+        }
+
         var oid = await ResolveOpenerOidAsync(ct);
         if (oid is null)
         {
@@ -108,17 +116,21 @@ public sealed class ScreenshareController(
             Mask(body.Ticket), oid, outcome.Success, outcome.Reason);
 
         if (!outcome.Success)
+        {
             return outcome.Reason == RedeemFailure.WrongHuman
                 ? StatusCode(StatusCodes.Status403Forbidden)
                 : StatusCode(StatusCodes.Status410Gone, new { reason = outcome.Reason.ToString() });
+        }
 
         var t = outcome.Ticket!;
         if (outcome.RedeemCookieId is not null)
+        {
             Response.Cookies.Append(RedeemCookie, outcome.RedeemCookieId, new CookieOptions
             {
                 HttpOnly = true, Secure = true, SameSite = SameSiteMode.Lax,
                 Path = "/api/screenshare", Expires = t.SessionUntilUtc,
             });
+        }
 
         return Ok(new SessionResponse(t.ComputerUrl, t.AriToken, t.ViewerUrl,
             t.Mode.ToString().ToLowerInvariant()));
@@ -127,9 +139,16 @@ public sealed class ScreenshareController(
     [HttpPost("/api/screenshare/state")]
     public async Task<IActionResult> State([FromBody] StateRequest? body, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(body?.Ticket)) return BadRequest();
+        if (string.IsNullOrWhiteSpace(body?.Ticket))
+        {
+            return BadRequest();
+        }
+
         var t = store.Get(body.Ticket);
-        if (t is null) return Ok(new StateResponse("ended"));
+        if (t is null)
+        {
+            return Ok(new StateResponse("ended"));
+        }
 
         var oid = await ResolveOpenerOidAsync(ct);
         var cookieOk = Request.Cookies.TryGetValue(RedeemCookie, out var c) && c == t.RedeemCookieId;
@@ -186,11 +205,17 @@ public sealed class ScreenshareController(
     {
         // DEV-ONLY bypass so the flow is testable locally before the app-reg / sign-in exists.
         if (IsDevBypass())
+        {
             return _options.DevBypassOid;
+        }
 
         // The opener authenticated interactively via OIDC; their identity lives in the cookie session.
         var auth = await HttpContext.AuthenticateAsync(CookieAuthenticationDefaults.AuthenticationScheme);
-        if (!auth.Succeeded || auth.Principal is null) return null;
+        if (!auth.Succeeded || auth.Principal is null)
+        {
+            return null;
+        }
+
         return auth.Principal.FindFirst("oid")?.Value
             ?? auth.Principal.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
     }

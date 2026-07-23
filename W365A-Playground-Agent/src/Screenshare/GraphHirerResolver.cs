@@ -4,6 +4,7 @@
 using System.Collections.Concurrent;
 using System.Net.Http.Headers;
 using System.Text.Json;
+
 using Azure.Core;
 using Azure.Identity;
 
@@ -58,10 +59,20 @@ public sealed class GraphHirerResolver : IHirerResolver
 
     public async Task<string?> ResolveHirerOidAsync(string agentInstanceId, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(agentInstanceId)) return null;
+        if (string.IsNullOrWhiteSpace(agentInstanceId))
+        {
+            return null;
+        }
+
         if (_cache.TryGetValue(agentInstanceId, out var e) && e.Expiry > DateTimeOffset.UtcNow)
+        {
             return e.Oid;
-        if (_credential is null) return null;
+        }
+
+        if (_credential is null)
+        {
+            return null;
+        }
 
         try
         {
@@ -91,11 +102,15 @@ public sealed class GraphHirerResolver : IHirerResolver
                 // (which needs a broader directory scope) — the oid is all we need for the
                 // opener==hirer check, so match on @odata.type == user and take the id.
                 foreach (var o in owners.EnumerateArray())
+                {
                     if (o.TryGetProperty("@odata.type", out var type)
                         && type.ValueKind == JsonValueKind.String
                         && string.Equals(type.GetString(), "#microsoft.graph.user", StringComparison.OrdinalIgnoreCase)
                         && o.TryGetProperty("id", out var id))
+                    {
                         return CacheAndReturn(agentInstanceId, id.GetString());
+                    }
+                }
             }
             _logger.LogWarning("GraphHirerResolver: no user owner found for {Instance} (share will be denied).", agentInstanceId);
             return CacheAndReturn(agentInstanceId, null);

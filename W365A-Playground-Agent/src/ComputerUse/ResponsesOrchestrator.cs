@@ -1,21 +1,23 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
+using System.Collections.Concurrent;
+using System.Net.Http;
+using System.Reflection;
+using System.Runtime.CompilerServices;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
+
 using Microsoft.Agents.Builder;
 using Microsoft.Agents.Core.Models;
 using Microsoft.Extensions.AI;
 using Microsoft.W365APlaygroundAgent.Screenshare;
 using Microsoft.W365APlaygroundAgent.Telemetry.AgentEnrichment;
+
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
-using System.Collections.Concurrent;
-using System.Reflection;
-using System.Text;
-using System.Text.Json;
-using System.Text.Json.Nodes;
-using System.Net.Http;
-using System.Runtime.CompilerServices;
-using System.Text.Json.Serialization;
 
 namespace Microsoft.W365APlaygroundAgent.ComputerUse;
 
@@ -68,7 +70,11 @@ public sealed class ResponsesOrchestrator
         /// </summary>
         public bool TrackAndSelectSession(string? sessionId)
         {
-            if (string.IsNullOrWhiteSpace(sessionId)) return false;
+            if (string.IsNullOrWhiteSpace(sessionId))
+            {
+                return false;
+            }
+
             var trimmed = sessionId.Trim();
             var isNew = W365SessionIds.Add(trimmed);
             W365SessionId = trimmed;
@@ -83,7 +89,11 @@ public sealed class ResponsesOrchestrator
         /// </summary>
         public bool RemoveSession(string? sessionId)
         {
-            if (string.IsNullOrWhiteSpace(sessionId)) return false;
+            if (string.IsNullOrWhiteSpace(sessionId))
+            {
+                return false;
+            }
+
             var removed = W365SessionIds.Remove(sessionId);
             SessionScreenShareUrls.Remove(sessionId);
             if (string.Equals(W365SessionId, sessionId, StringComparison.OrdinalIgnoreCase))
@@ -372,7 +382,11 @@ public sealed class ResponsesOrchestrator
                 foreach (var t in catalog)
                 {
                     if (!W365SupplementaryDesktopTools.Contains(t.Name)) { droppedCount++; continue; }
-                    if (toolsByName.ContainsKey(t.Name)) continue;
+                    if (toolsByName.ContainsKey(t.Name))
+                    {
+                        continue;
+                    }
+
                     var wrapper = new W365DesktopTool(t, state.W365McpClient, () => state.W365SessionId, _logger);
                     toolsByName[t.Name] = wrapper;
                     augmented.Add(wrapper);
@@ -451,7 +465,9 @@ public sealed class ResponsesOrchestrator
 
             // Append all output items to history so they appear as context in the next call
             foreach (var item in response.Output)
+            {
                 history.Add(item);
+            }
 
             // Remove input_image items now that the model has processed them.
             // Each screenshot is ~200k chars; keeping them would accumulate over long CUA sessions.
@@ -469,9 +485,13 @@ public sealed class ResponsesOrchestrator
                     if (!string.IsNullOrEmpty(text))
                     {
                         if (streamTextToClient)
+                        {
                             turnContext.StreamingResponse.QueueTextChunk(text);
+                        }
                         else
+                        {
                             await turnContext.SendActivityAsync(MessageFactory.Text(text), cancellationToken);
+                        }
                     }
                 }
                 else if (type == "function_call")
@@ -491,7 +511,10 @@ public sealed class ResponsesOrchestrator
                 response.Output.Count(o => o.GetProperty("type").GetString() == "message"),
                 functionCalls.Count, computerCalls.Count);
 
-            if (functionCalls.Count == 0 && computerCalls.Count == 0) break;
+            if (functionCalls.Count == 0 && computerCalls.Count == 0)
+            {
+                break;
+            }
 
             foreach (var call in functionCalls)
             {
@@ -527,7 +550,10 @@ bool recovered = false;
                             && toolsByName.TryGetValue(name, out var freshFunc))
                         {
                             outcome = await HandleToolCallAsync(state, history, freshFunc, callId, argumentsJson, turnContext, cancellationToken, isFinalAttempt: isFinal);
-                            if (outcome != ToolCallOutcome.Mcp401) recovered = true;
+                            if (outcome != ToolCallOutcome.Mcp401)
+                            {
+                                recovered = true;
+                            }
                         }
                         else
                         {
@@ -791,7 +817,10 @@ bool recovered = false;
             _logger.LogInformation("Tool '{Name}' result={ResultLen}chars", func.Name, resultStr.Length);
 
             if (_logger.IsEnabled(LogLevel.Debug) && resultStr.Length <= 2000)
+            {
                 _logger.LogDebug("Tool '{Name}' result body: {Result}", func.Name, resultStr);
+            }
+
             history.Add(MakeFunctionCallOutput(callId, resultStr));
         }
 
@@ -839,7 +868,10 @@ bool recovered = false;
         var actionList = new List<JsonElement>();
         if (call.TryGetProperty("actions", out var actionsEl) && actionsEl.ValueKind == JsonValueKind.Array)
         {
-            foreach (var a in actionsEl.EnumerateArray()) actionList.Add(a);
+            foreach (var a in actionsEl.EnumerateArray())
+            {
+                actionList.Add(a);
+            }
         }
         else if (call.TryGetProperty("action", out var actionEl) && actionEl.ValueKind == JsonValueKind.Object)
         {
@@ -1008,7 +1040,11 @@ bool recovered = false;
                 {
                     var button = CuaActionNormalization.NormalizeMouseButton(
                         action.TryGetProperty("button", out var b) ? b.GetString() : null);
-                    if (button is null) return null; // back/forward — no-op
+                    if (button is null)
+                    {
+                        return null; // back/forward — no-op
+                    }
+
                     var clickCount = actionType.Equals("triple_click", StringComparison.OrdinalIgnoreCase) ? 3
                                    : actionType.Equals("double_click", StringComparison.OrdinalIgnoreCase) ? 2
                                    : 1;
@@ -1089,7 +1125,9 @@ bool recovered = false;
         }
 
         if (!args.ContainsKey("sessionId") && !string.IsNullOrEmpty(sessionId))
+        {
             args["sessionId"] = sessionId;
+        }
 
         return (toolName!, args);
     }
@@ -1103,7 +1141,11 @@ bool recovered = false;
     private async Task<(string Base64, string MimeType)?> CaptureScreenshotAsync(
         ConversationState state, CancellationToken cancellationToken)
     {
-        if (state.W365McpClient is null || string.IsNullOrEmpty(state.W365SessionId)) return null;
+        if (state.W365McpClient is null || string.IsNullOrEmpty(state.W365SessionId))
+        {
+            return null;
+        }
+
         var args = new Dictionary<string, object?> { ["sessionId"] = state.W365SessionId };
         CallToolResponse result;
         try
@@ -1246,10 +1288,15 @@ bool recovered = false;
     /// </summary>
     private static (string Base64, string MimeType)? ExtractBase64FromResult(object? result)
     {
-        if (result is null) return null;
+        if (result is null)
+        {
+            return null;
+        }
 
         if (result is JsonElement je)
+        {
             return SearchJsonForImage(je);
+        }
 
         // Raw CallToolResponse (or any other object): serialise + search.
         try
@@ -1276,7 +1323,10 @@ bool recovered = false;
             foreach (var item in el.EnumerateArray())
             {
                 var r = SearchJsonForImage(item);
-                if (r != null) return r;
+                if (r != null)
+                {
+                    return r;
+                }
             }
         }
         else if (el.ValueKind == JsonValueKind.Object)
@@ -1298,7 +1348,10 @@ bool recovered = false;
             foreach (var prop in el.EnumerateObject())
             {
                 var r = SearchJsonForImage(prop.Value);
-                if (r != null) return r;
+                if (r != null)
+                {
+                    return r;
+                }
             }
         }
         return null;
@@ -1316,6 +1369,7 @@ bool recovered = false;
         {
             using var doc = JsonDocument.Parse(json);
             foreach (var prop in doc.RootElement.EnumerateObject())
+            {
                 result[prop.Name] = prop.Value.ValueKind switch
                 {
                     JsonValueKind.String => prop.Value.GetString(),
@@ -1327,6 +1381,7 @@ bool recovered = false;
                     // not raw JSON strings (e.g. commands:["whoami"] must stay a list, not "[\\"whoami\\"]")
                     _ => prop.Value.Clone()
                 };
+            }
         }
         catch (JsonException ex)
         {
@@ -1355,14 +1410,31 @@ bool recovered = false;
 
     private static string ExtractMessageText(JsonElement item)
     {
-        if (!item.TryGetProperty("content", out var content)) return string.Empty;
-        if (content.ValueKind == JsonValueKind.String) return content.GetString() ?? string.Empty;
-        if (content.ValueKind != JsonValueKind.Array) return string.Empty;
+        if (!item.TryGetProperty("content", out var content))
+        {
+            return string.Empty;
+        }
+
+        if (content.ValueKind == JsonValueKind.String)
+        {
+            return content.GetString() ?? string.Empty;
+        }
+
+        if (content.ValueKind != JsonValueKind.Array)
+        {
+            return string.Empty;
+        }
+
         var sb = new StringBuilder();
         foreach (var part in content.EnumerateArray())
+        {
             if (part.TryGetProperty("type", out var t) && t.GetString() == "output_text" &&
                 part.TryGetProperty("text", out var text))
+            {
                 sb.Append(text.GetString());
+            }
+        }
+
         return sb.ToString();
     }
 
@@ -1419,7 +1491,11 @@ bool recovered = false;
     /// </summary>
     private void EnsureW365McpClient(IList<AITool> tools, ConversationState state)
     {
-        if (state.W365McpClientResolved) return;
+        if (state.W365McpClientResolved)
+        {
+            return;
+        }
+
         state.W365McpClientResolved = true;
 
         if (McpClientToolClientField == null)
@@ -1441,9 +1517,13 @@ bool recovered = false;
         {
             state.W365McpClient = McpClientToolClientField.GetValue(w365Tool) as IMcpClient;
             if (state.W365McpClient != null)
+            {
                 _logger.LogInformation("Cached W365 IMcpClient via reflection from tool '{Name}'.", w365Tool.Name);
+            }
             else
+            {
                 _logger.LogWarning("Reflected '_client' from '{Name}' was null or not an IMcpClient.", w365Tool.Name);
+            }
         }
         catch (Exception ex)
         {
@@ -1503,7 +1583,11 @@ bool recovered = false;
             JsonElement je => je.GetRawText(),
             _ => JsonSerializer.Serialize(result, JsonOptions)
         };
-        if (string.IsNullOrWhiteSpace(asString)) return null;
+        if (string.IsNullOrWhiteSpace(asString))
+        {
+            return null;
+        }
+
         try
         {
             using var doc = JsonDocument.Parse(asString);
@@ -1522,7 +1606,10 @@ bool recovered = false;
             case JsonValueKind.Object:
                 foreach (var p in el.EnumerateObject())
                 {
-                    if (p.NameEquals(name) && p.Value.ValueKind == JsonValueKind.String) return p.Value.GetString();
+                    if (p.NameEquals(name) && p.Value.ValueKind == JsonValueKind.String)
+                    {
+                        return p.Value.GetString();
+                    }
 
                     // MCP content blocks: {"type":"text","text":"<json>"} — the W365 lifecycle tools
                     // return their payload as a JSON-encoded STRING inside a content array, so the target
@@ -1536,21 +1623,30 @@ bool recovered = false;
                             {
                                 using var innerDoc = JsonDocument.Parse(inner);
                                 var innerFound = SearchForStringProperty(innerDoc.RootElement, name);
-                                if (innerFound is not null) return innerFound;
+                                if (innerFound is not null)
+                                {
+                                    return innerFound;
+                                }
                             }
                             catch (JsonException) { /* not JSON; skip */ }
                         }
                     }
 
                     var nested = SearchForStringProperty(p.Value, name);
-                    if (nested is not null) return nested;
+                    if (nested is not null)
+                    {
+                        return nested;
+                    }
                 }
                 break;
             case JsonValueKind.Array:
                 foreach (var item in el.EnumerateArray())
                 {
                     var nested = SearchForStringProperty(item, name);
-                    if (nested is not null) return nested;
+                    if (nested is not null)
+                    {
+                        return nested;
+                    }
                 }
                 break;
         }
@@ -1572,13 +1668,22 @@ bool recovered = false;
         string toolName,
         CancellationToken ct)
     {
-        if (!args.TryGetValue("sessionId", out var sidObj)) return (true, null);
+        if (!args.TryGetValue("sessionId", out var sidObj))
+        {
+            return (true, null);
+        }
+
         var argSessionId = sidObj?.ToString();
-        if (string.IsNullOrWhiteSpace(argSessionId)) return (true, null);
+        if (string.IsNullOrWhiteSpace(argSessionId))
+        {
+            return (true, null);
+        }
 
         // Already the selected session — nothing to do.
         if (string.Equals(argSessionId, state.W365SessionId, StringComparison.OrdinalIgnoreCase))
+        {
             return (true, null);
+        }
 
         // Tracked but not selected — auto-switch.
         if (state.W365SessionIds.Contains(argSessionId))
@@ -1757,7 +1862,9 @@ bool recovered = false;
                 // SDK to notice the session died or for SessionUntil to elapse.
                 var revoked = _ticketStore.RevokeBySession(endedId);
                 if (revoked > 0)
+                {
                     _logger.LogInformation("[Screenshare] EndSession revoked {Count} live view(s) for session {SessionId}.", revoked, endedId);
+                }
             }
             else
             {
@@ -1896,7 +2003,10 @@ bool recovered = false;
                 }
                 continue;
             }
-            if (state.W365SessionIds.Count == 0) continue;
+            if (state.W365SessionIds.Count == 0)
+            {
+                continue;
+            }
 
             // Defensive snapshot — RemoveSession mutates the HashSet.
             var sessionIds = state.W365SessionIds.ToArray();
@@ -1959,7 +2069,10 @@ bool recovered = false;
             JsonElement je => je.GetRawText(),
             _ => JsonSerializer.Serialize(result, JsonOptions)
         };
-        if (string.IsNullOrWhiteSpace(asString)) return null;
+        if (string.IsNullOrWhiteSpace(asString))
+        {
+            return null;
+        }
 
         try
         {
@@ -1989,7 +2102,10 @@ bool recovered = false;
                         && prop.Value.ValueKind == JsonValueKind.String)
                     {
                         var v = prop.Value.GetString();
-                        if (!string.IsNullOrEmpty(v)) return v;
+                        if (!string.IsNullOrEmpty(v))
+                        {
+                            return v;
+                        }
                     }
 
                     // MCP content blocks: {"type":"text","text":"<json>"} — re-parse the inner text.
@@ -2003,21 +2119,30 @@ bool recovered = false;
                             {
                                 using var doc = JsonDocument.Parse(inner);
                                 var found = SearchForSessionId(doc.RootElement);
-                                if (!string.IsNullOrEmpty(found)) return found;
+                                if (!string.IsNullOrEmpty(found))
+                                {
+                                    return found;
+                                }
                             }
                             catch (JsonException) { /* not JSON; skip */ }
                         }
                     }
 
                     var rec = SearchForSessionId(prop.Value);
-                    if (!string.IsNullOrEmpty(rec)) return rec;
+                    if (!string.IsNullOrEmpty(rec))
+                    {
+                        return rec;
+                    }
                 }
                 return null;
             case JsonValueKind.Array:
                 foreach (var item in el.EnumerateArray())
                 {
                     var rec = SearchForSessionId(item);
-                    if (!string.IsNullOrEmpty(rec)) return rec;
+                    if (!string.IsNullOrEmpty(rec))
+                    {
+                        return rec;
+                    }
                 }
                 return null;
             default:
@@ -2088,7 +2213,11 @@ internal sealed class W365DesktopTool : AIFunction
 
         // Mirror lifecycle auto-injection: if the model didn't pass sessionId, fill it in.
         var args = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-        foreach (var kvp in arguments) args[kvp.Key] = kvp.Value;
+        foreach (var kvp in arguments)
+        {
+            args[kvp.Key] = kvp.Value;
+        }
+
         if (!args.ContainsKey("sessionId"))
         {
             args["sessionId"] = sessionId;
@@ -2174,7 +2303,11 @@ internal static class CuaActionNormalization
     /// </summary>
     public static string? NormalizeMouseButton(string? button)
     {
-        if (string.IsNullOrWhiteSpace(button)) return "Left";
+        if (string.IsNullOrWhiteSpace(button))
+        {
+            return "Left";
+        }
+
         return button.ToLowerInvariant() switch
         {
             "left" => "Left",
@@ -2196,7 +2329,11 @@ internal static class CuaActionNormalization
         var result = new List<string>();
         foreach (var k in keys)
         {
-            if (string.IsNullOrEmpty(k)) continue;
+            if (string.IsNullOrEmpty(k))
+            {
+                continue;
+            }
+
             if (KeyAliases.TryGetValue(k, out var alias)) { result.Add(alias); continue; }
             // Single character → lowercase passthrough (works for a-z, 0-9, punctuation).
             if (k.Length == 1) { result.Add(k.ToLowerInvariant()); continue; }
@@ -2216,18 +2353,30 @@ internal static class CuaActionNormalization
         if (action.TryGetProperty("keys", out var keysEl) && keysEl.ValueKind == JsonValueKind.Array)
         {
             foreach (var k in keysEl.EnumerateArray())
+            {
                 if (k.ValueKind == JsonValueKind.String && k.GetString() is { } s)
+                {
                     yield return s;
+                }
+            }
+
             yield break;
         }
         if (action.TryGetProperty("text", out var textEl) && textEl.ValueKind == JsonValueKind.String)
         {
-            if (textEl.GetString() is { } s) yield return s;
+            if (textEl.GetString() is { } s)
+            {
+                yield return s;
+            }
+
             yield break;
         }
         if (action.TryGetProperty("key", out var keyEl) && keyEl.ValueKind == JsonValueKind.String)
         {
-            if (keyEl.GetString() is { } s) yield return s;
+            if (keyEl.GetString() is { } s)
+            {
+                yield return s;
+            }
         }
     }
 }

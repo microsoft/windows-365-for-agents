@@ -2,7 +2,9 @@
 // Licensed under the MIT License.
 
 using Azure.Monitor.OpenTelemetry.AspNetCore;
+
 using Microsoft.W365APlaygroundAgent.Telemetry.AgentEnrichment;
+
 using OpenTelemetry;
 using OpenTelemetry.Logs;
 using OpenTelemetry.Metrics;

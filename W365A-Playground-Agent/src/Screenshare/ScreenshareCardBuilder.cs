@@ -3,6 +3,7 @@
 
 using System.Globalization;
 using System.Text.Json.Nodes;
+
 using Microsoft.Agents.Core.Models;
 
 namespace Microsoft.W365APlaygroundAgent.Screenshare;

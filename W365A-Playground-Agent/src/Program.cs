@@ -1,13 +1,8 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-using Microsoft.W365APlaygroundAgent.Agent;
-using Microsoft.W365APlaygroundAgent.Auth;
-using Microsoft.W365APlaygroundAgent.ComputerUse;
-using Microsoft.W365APlaygroundAgent.Screenshare;
-using Microsoft.W365APlaygroundAgent.Telemetry;
-using Microsoft.W365APlaygroundAgent.Throttling;
-using Microsoft.AspNetCore.RateLimiting;
+using System.Reflection;
+
 using Microsoft.Agents.A365.Observability.Extensions.AgentFramework;
 using Microsoft.Agents.A365.Observability.Runtime;
 using Microsoft.Agents.A365.Tooling.Extensions.AgentFramework.Services;
@@ -16,8 +11,14 @@ using Microsoft.Agents.Builder;
 using Microsoft.Agents.Hosting.AspNetCore;
 using Microsoft.Agents.Storage;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Identity.Web;
-using System.Reflection;
+using Microsoft.W365APlaygroundAgent.Agent;
+using Microsoft.W365APlaygroundAgent.Auth;
+using Microsoft.W365APlaygroundAgent.ComputerUse;
+using Microsoft.W365APlaygroundAgent.Screenshare;
+using Microsoft.W365APlaygroundAgent.Telemetry;
+using Microsoft.W365APlaygroundAgent.Throttling;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -97,9 +98,15 @@ if (Guid.TryParse(azureAdSection["ClientId"], out _))
         var priorRedirect = o.Events.OnRedirectToIdentityProvider;
         o.Events.OnRedirectToIdentityProvider = async ctx =>
         {
-            if (priorRedirect is not null) await priorRedirect(ctx);
+            if (priorRedirect is not null)
+            {
+                await priorRedirect(ctx);
+            }
+
             if (ctx.Properties.Items.TryGetValue("prompt", out var prompt) && !string.IsNullOrEmpty(prompt))
+            {
                 ctx.ProtocolMessage.Prompt = prompt;
+            }
         };
     });
 }

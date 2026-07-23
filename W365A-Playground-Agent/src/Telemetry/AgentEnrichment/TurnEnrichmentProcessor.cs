@@ -36,7 +36,10 @@ internal sealed class TurnEnrichmentProcessor : BaseProcessor<LogRecord>
             {
                 foreach (var kv in existing)
                 {
-                    if (!IdentityKeys.Contains(kv.Key)) enriched.Add(kv);
+                    if (!IdentityKeys.Contains(kv.Key))
+                    {
+                        enriched.Add(kv);
+                    }
                 }
             }
 

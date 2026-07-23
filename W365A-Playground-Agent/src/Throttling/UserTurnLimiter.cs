@@ -29,14 +29,19 @@ public class UserTurnLimiter : IUserTurnLimiter
     public bool TryConsume(string? aadObjectId, out int currentCount)
     {
         currentCount = 0;
-        if (string.IsNullOrEmpty(aadObjectId)) return false;
+        if (string.IsNullOrEmpty(aadObjectId))
+        {
+            return false;
+        }
 
         var queue = _userWindows.GetOrAdd(aadObjectId, _ => new Queue<DateTime>());
         lock (queue)
         {
             var cutoff = DateTime.UtcNow - Window;
             while (queue.Count > 0 && queue.Peek() < cutoff)
+            {
                 queue.Dequeue();
+            }
 
             if (queue.Count >= MaxTurnsPerWindow)
             {

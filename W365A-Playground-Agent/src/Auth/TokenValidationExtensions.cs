@@ -1,6 +1,10 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
+using System.Collections.Concurrent;
+using System.Globalization;
+using System.IdentityModel.Tokens.Jwt;
+
 using Microsoft.Agents.Authentication;
 using Microsoft.Agents.Core;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -8,9 +12,6 @@ using Microsoft.IdentityModel.Protocols;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.IdentityModel.Validators;
-using System.Collections.Concurrent;
-using System.Globalization;
-using System.IdentityModel.Tokens.Jwt;
 
 namespace Microsoft.W365APlaygroundAgent.Auth;
 
