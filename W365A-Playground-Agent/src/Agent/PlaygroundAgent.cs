@@ -42,6 +42,7 @@ public class PlaygroundAgent : AgentApplication
     - If StartSession fails, retry once. If it still fails, tell the user to check that the agent user is assigned to a valid agent pool.
     - Once a session is active you have a NATIVE computer-use capability: describe physical desktop actions naturally (click, double-click, type text, press keys, scroll, drag, take a screenshot, open a URL) and the system translates them into low-level desktop operations and feeds you back a screenshot automatically.
     - You ALSO have a small set of supplementary function tools for things the computer-use channel cannot do: execute_shell_command, execute_python_code, launch_application, list_processes/kill_process, list_windows, get_accessibility_tree, find_ui_element, analyze_screen, get_system_info, clipboard_read/clipboard_write. sessionId is auto-injected on all of these.
+    - Narrate CRITICAL steps only: right before a significant or hard-to-reverse action (opening a new app or website, signing in, submitting a form, sending/deleting/purchasing, or starting a long multi-step task), post ONE short sentence saying what you're about to do. Do NOT narrate routine actions (individual clicks, keystrokes, typing, scrolling, waiting, or taking screenshots) — that just clutters the chat.
     - Call mcp_W365ComputerUse_EndSession when the user is finished.
     """;
 
@@ -340,6 +341,12 @@ public class PlaygroundAgent : AgentApplication
         // Agentic requests use the agentic auth handler; everything else (Playground, WebChat) uses OBO.
         var authHandlerName = turnContext.IsAgenticRequest() ? _agenticAuthHandlerName : _oboAuthHandlerName;
 
+        // Teams streaming allows only ONE uninterrupted stream per chat, but CUA turns interleave separate
+        // messages (screenshots, the screenshare card, typing pings) and run long — which makes Teams stop
+        // the stream ("This response was stopped") and drop the final answer. So on agentic (Teams) turns we
+        // don't stream: model text is sent as normal messages instead. Streaming stays for non-agentic (WebChat).
+        var useStreaming = !turnContext.IsAgenticRequest();
+
         using var turn = _turnScopes.BeginTurn(turnContext);
         try
         {
@@ -368,9 +375,10 @@ public class PlaygroundAgent : AgentApplication
                 catch (OperationCanceledException) { /* expected on cancel */ }
             }, typingCts.Token);
 
-            // StreamingResponse is best-effort: in Teams with agentic identity the SDK may buffer/downscale it.
-            // The ack + typing loop above handle the immediate UX; streaming remains for non-Teams / WebChat clients.
-            await turnContext.StreamingResponse.QueueInformativeUpdateAsync("Just a moment please..").ConfigureAwait(false);
+            // StreamingResponse is only used for non-agentic (WebChat/Playground) turns; see useStreaming above.
+            // On Teams the ack + typing loop handle the immediate UX and streaming is bypassed entirely.
+            if (useStreaming)
+                await turnContext.StreamingResponse.QueueInformativeUpdateAsync("Just a moment please...").ConfigureAwait(false);
             try
             {
                 var userText = turnContext.Activity.Text?.Trim() ?? string.Empty;
@@ -415,7 +423,8 @@ await _orchestrator.RunAsync(conversationKey, userText, GetAgentInstructions(dis
                 {
                     // Expected: typingTask is canceled when typingCts is canceled; no further action required.
                 }
-                await turnContext.StreamingResponse.EndStreamAsync(cancellationToken).ConfigureAwait(false);
+                if (useStreaming)
+                    await turnContext.StreamingResponse.EndStreamAsync(cancellationToken).ConfigureAwait(false);
             }
             turn.SetSuccess(true);
         }
@@ -511,7 +520,8 @@ await _orchestrator.RunAsync(conversationKey, userText, GetAgentInstructions(dis
                             toolCacheKey, _lastForceRefreshTokenRefreshed?.ToString() ?? "unknown");
                     }
 
-                    await context.StreamingResponse.QueueInformativeUpdateAsync("Loading tools...");
+                    if (!context.IsAgenticRequest())
+                        await context.StreamingResponse.QueueInformativeUpdateAsync("Loading tools...");
 
                     // For the bearer token (development) flow, pass the token as an override and
                     // use the OBO handler (or fall back to the agentic handler) as the handler.
