@@ -4,6 +4,7 @@
 using Microsoft.Agents.Builder;
 using Microsoft.Agents.Core.Models;
 using Microsoft.Extensions.AI;
+using Microsoft.W365APlaygroundAgent.Screenshare;
 using Microsoft.W365APlaygroundAgent.Telemetry.AgentEnrichment;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
@@ -33,6 +34,7 @@ public sealed class ResponsesOrchestrator
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<ResponsesOrchestrator> _logger;
     private readonly ITurnScopeAccessor _turnScopes;
+    private readonly IScreenshareTicketStore _ticketStore;
     private readonly string _responsesUrl;
     private readonly string _model;
     private readonly string _apiKey;
@@ -83,6 +85,7 @@ public sealed class ResponsesOrchestrator
         {
             if (string.IsNullOrWhiteSpace(sessionId)) return false;
             var removed = W365SessionIds.Remove(sessionId);
+            SessionScreenShareUrls.Remove(sessionId);
             if (string.Equals(W365SessionId, sessionId, StringComparison.OrdinalIgnoreCase))
             {
                 W365SessionId = W365SessionIds.LastOrDefault();
@@ -104,6 +107,10 @@ public sealed class ResponsesOrchestrator
 
         /// <summary>Set on a direct-client 401; consumed next turn to force MCP re-enumeration.</summary>
         public bool ToolRefreshRequested { get; set; }
+
+        /// <summary>Maps each active W365 sessionId → its screenShareUrl (captured at StartSession) so the
+        /// agent can (re-)offer a "Watch live" card for the currently-selected session at any time.</summary>
+        public Dictionary<string, string> SessionScreenShareUrls { get; } = new(StringComparer.OrdinalIgnoreCase);
 
         /// <summary>
         /// Session-scoped desktop tool catalog returned by the W365 MCP gateway after a
@@ -130,7 +137,7 @@ public sealed class ResponsesOrchestrator
     // them rather than discover them dynamically because the MCP protocol does not (yet)
     // expose semantic role metadata on tools — `tools/list` returns names + schemas but no
     // hint of which tool is "session.start" vs "session.end", etc. Until the W365 server
-    // publishes `_meta.role` annotations (tracked as a follow-up issue), the orchestrator
+    // publishes `_meta.role` annotations, the orchestrator
     // must know specific names to:
     //   1. Recognize lifecycle tools so it can parse the sessionId out of StartSession's
     //      response, refresh the session-scoped tool catalog, capture the initial
@@ -141,8 +148,8 @@ public sealed class ResponsesOrchestrator
     //      (see MapActionToMcpTool — this mapping is intrinsic translation between two
     //      independent third-party APIs and cannot be discovered at runtime).
     //
-    // W365 MCP is in preview; names CAN change. To minimize fallout when that happens, see
-    // CONSIDER comments at each call site and the follow-up issues filed in the repo.
+    // W365 MCP is in preview; names CAN change. To minimize fallout when that happens, see the
+    // CONSIDER comments at each call site.
     // -------------------------------------------------------------------------------------
 
     // W365 explicit-session contract tool names — the only W365 tools published via tools/list
@@ -152,7 +159,7 @@ public sealed class ResponsesOrchestrator
     // CONSIDER (W365 preview churn): if the server team renames these, every hook in this
     // file that branches on W365LifecycleToolNames will silently fail. A startup sanity
     // check that warns when an expected lifecycle tool is missing from the gateway catalog
-    // is tracked as a follow-up.
+    // would harden this.
     private const string W365StartSessionToolName = "mcp_W365ComputerUse_StartSession";
     private const string W365EndSessionToolName = "mcp_W365ComputerUse_EndSession";
     private const string W365GetSessionDetailsToolName = "mcp_W365ComputerUse_GetSessionDetails";
@@ -209,7 +216,7 @@ public sealed class ResponsesOrchestrator
     // CONSIDER (W365 preview churn): an allow-list silently drops any newly-added server
     // tool — they will not be exposed to the model until this list is updated. An
     // alternative deny-list approach (drop the 8 CUA-redundant names + `browser_*` prefix,
-    // expose everything else) auto-picks-up new tools and is tracked as a follow-up.
+    // expose everything else) would auto-pick-up new tools.
     private static readonly HashSet<string> W365SupplementaryDesktopTools = new(StringComparer.OrdinalIgnoreCase)
     {
         // OS / process control
@@ -249,7 +256,7 @@ public sealed class ResponsesOrchestrator
 
     private const int MaxConversations = 100;
 
-    // wi-017 reactive MCP 401 recovery bounds (configurable via appsettings ToolCache:*).
+    // Reactive MCP 401 recovery bounds (configurable via appsettings ToolCache:*).
     private readonly int _max401RetriesPerCall;
     private readonly int _max401ReacquiresPerTurn;
 
@@ -272,11 +279,13 @@ public sealed class ResponsesOrchestrator
         IHttpClientFactory httpClientFactory,
         IConfiguration configuration,
         ILogger<ResponsesOrchestrator> logger,
-        ITurnScopeAccessor turnScopes)
+        ITurnScopeAccessor turnScopes,
+        IScreenshareTicketStore ticketStore)
     {
         _httpClientFactory = httpClientFactory;
         _logger = logger;
         _turnScopes = turnScopes;
+        _ticketStore = ticketStore;
 
         var endpoint = (configuration["AIServices:AzureOpenAI:Endpoint"]
             ?? throw new InvalidOperationException("AIServices:AzureOpenAI:Endpoint is required.")).TrimEnd('/');
@@ -289,7 +298,7 @@ public sealed class ResponsesOrchestrator
         // See: https://learn.microsoft.com/azure/foundry/openai/api-version-lifecycle
         _responsesUrl = $"{endpoint}/openai/v1/responses";
 
-        // wi-017: per-call retry and per-turn re-enumeration caps (default 1 each).
+        // Per-call retry and per-turn re-enumeration caps (default 1 each).
         _max401RetriesPerCall = configuration.GetValue("ToolCache:Max401RetriesPerCall", 1);
         _max401ReacquiresPerTurn = configuration.GetValue("ToolCache:Max401ReacquiresPerTurn", 1);
     }
@@ -306,6 +315,7 @@ public sealed class ResponsesOrchestrator
         IList<AITool> tools,
         Func<CancellationToken, Task<ToolReacquireResult>> reacquireTools,
         ITurnContext turnContext,
+        Func<string, string, CancellationToken, Task>? offerScreenshareAsync,
         CancellationToken cancellationToken)
     {
         // Soft cap: evict the least-recently-used conversation when a new key would exceed the limit.
@@ -381,7 +391,7 @@ public sealed class ResponsesOrchestrator
 
         history.Add(MakeUserTextMessage(userMessage));
 
-        // wi-017 reactive recovery: on an MCP 401, re-enumerate MCP tools (fresh transport token)
+        // Reactive recovery: on an MCP 401, re-enumerate MCP tools (fresh transport token)
         // and rebuild the plumbing, bounded by _max401ReacquiresPerTurn. TryHandleMcp401 has
         // already reset the W365 client latch, so EnsureW365McpClient re-resolves from fresh tools.
         int reacquireCount = 0;
@@ -402,6 +412,9 @@ public sealed class ResponsesOrchestrator
             state.ToolRefreshRequested = false; // same-turn recovery satisfies any deferred request
             return true;
         }
+
+        // At most one "Watch live" auto-offer attempt per turn (a failed mint must not spam).
+        var screenshareOfferAttempted = false;
 
         // The agent loop — the canonical pattern: call model → stream text → execute any tool
         // calls the model requested → repeat until the model returns a message with no further
@@ -544,6 +557,35 @@ bool recovered = false;
             foreach (var call in computerCalls)
             {
                 await HandleComputerCallAsync(state, history, call, turnContext, cancellationToken);
+            }
+
+            // Aggressive auto-(re)offer of the "Watch live" card: if this iteration did any CUA work
+            // (StartSession, a W365 supplementary desktop tool, or a native computer_call) and the
+            // selected session has NO live/redeemable card, send a fresh one so the hirer can always
+            // watch — including after they closed/stopped a prior view or let an offer expire. Bounded
+            // to one attempt per turn so a failing mint (e.g. unresolved hirer) can't spam.
+            if (!screenshareOfferAttempted && offerScreenshareAsync is not null)
+            {
+                // EndSession is the sole CUA tool that must NOT (re)offer a card: the session is being
+                // torn down, so a fresh "Watch live" offer would point at a dying (or, with multiple
+                // sessions, an unrelated promoted) session. Suppress the offer whenever this iteration
+                // ended a session.
+                var endedSession = functionCalls.Any(fc => fc.TryGetProperty("name", out var n)
+                    && string.Equals(n.GetString(), W365EndSessionToolName, StringComparison.OrdinalIgnoreCase));
+
+                var cuaActivity = computerCalls.Count > 0
+                    || functionCalls.Any(fc => fc.TryGetProperty("name", out var n) && n.GetString() is { } nm
+                        && (W365LifecycleToolNames.Contains(nm) || W365SupplementaryDesktopTools.Contains(nm)));
+                if (!endedSession
+                    && cuaActivity
+                    && state.W365SessionId is { } offSid
+                    && state.SessionScreenShareUrls.TryGetValue(offSid, out var offUrl)
+                    && !_ticketStore.HasRedeemableTicket(offSid))
+                {
+                    screenshareOfferAttempted = true;
+                    try { await offerScreenshareAsync(offSid, offUrl, cancellationToken); }
+                    catch (Exception ex) { _logger.LogWarning(ex, "[Screenshare] auto-offer failed (non-fatal)."); }
+                }
             }
         }
     }
@@ -939,8 +981,8 @@ bool recovered = false;
     /// the other, so this mapping CANNOT be discovered at runtime. The fragility is real but
     /// intrinsic — if either side renames an action / tool / argument, this method must be
     /// updated. The W365 server is in preview; a startup sanity check that verifies every
-    /// target tool name returned here is actually present in the session-scoped catalog is
-    /// tracked as a follow-up.
+    /// target tool name returned here is actually present in the session-scoped catalog
+    /// would harden this.
     /// </remarks>
     private static (string ToolName, Dictionary<string, object?> Args)? MapActionToMcpTool(
         string actionType, JsonElement action, string? sessionId)
@@ -1441,6 +1483,70 @@ bool recovered = false;
         return false;
     }
 
+    /// <summary>Best-effort read of "screenShareUrl" from a StartSession result (top-level or nested).</summary>
+    private static string? TryExtractScreenShareUrlFromResult(object? result)
+    {
+        var asString = result switch
+        {
+            null => null,
+            string s => s,
+            JsonElement je => je.GetRawText(),
+            _ => JsonSerializer.Serialize(result, JsonOptions)
+        };
+        if (string.IsNullOrWhiteSpace(asString)) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(asString);
+            return SearchForStringProperty(doc.RootElement, "screenShareUrl");
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static string? SearchForStringProperty(JsonElement el, string name)
+    {
+        switch (el.ValueKind)
+        {
+            case JsonValueKind.Object:
+                foreach (var p in el.EnumerateObject())
+                {
+                    if (p.NameEquals(name) && p.Value.ValueKind == JsonValueKind.String) return p.Value.GetString();
+
+                    // MCP content blocks: {"type":"text","text":"<json>"} — the W365 lifecycle tools
+                    // return their payload as a JSON-encoded STRING inside a content array, so the target
+                    // property lives one parse deeper. Re-parse the inner text (mirrors SearchForSessionId).
+                    if (p.NameEquals("text") && p.Value.ValueKind == JsonValueKind.String)
+                    {
+                        var inner = p.Value.GetString();
+                        if (!string.IsNullOrWhiteSpace(inner))
+                        {
+                            try
+                            {
+                                using var innerDoc = JsonDocument.Parse(inner);
+                                var innerFound = SearchForStringProperty(innerDoc.RootElement, name);
+                                if (innerFound is not null) return innerFound;
+                            }
+                            catch (JsonException) { /* not JSON; skip */ }
+                        }
+                    }
+
+                    var nested = SearchForStringProperty(p.Value, name);
+                    if (nested is not null) return nested;
+                }
+                break;
+            case JsonValueKind.Array:
+                foreach (var item in el.EnumerateArray())
+                {
+                    var nested = SearchForStringProperty(item, name);
+                    if (nested is not null) return nested;
+                }
+                break;
+        }
+        return null;
+    }
+
     /// <summary>
     /// Validate the model-supplied <c>sessionId</c> against the conversation's
     /// tracked-session set, and if it points at a tracked-but-not-currently-selected session,
@@ -1521,6 +1627,29 @@ bool recovered = false;
                     _logger.LogInformation(
                         "Tracked new W365 sessionId from StartSession: {SessionId} (total active in this conversation: {Count})",
                         sessionId, state.W365SessionIds.Count);
+
+                    // Cache the screenShareUrl so the agent can (re-)offer a "Watch live" card for this
+                    // session at any time (the aggressive auto-offer in RunAsync reads this cache).
+                    var screenShareUrl = TryExtractScreenShareUrlFromResult(result);
+                    if (!string.IsNullOrEmpty(screenShareUrl))
+                    {
+                        _logger.LogDebug("[Screenshare] cached screenShareUrl for session {SessionId} (len {Len}).", sessionId, screenShareUrl.Length);
+                        state.SessionScreenShareUrls[sessionId!] = screenShareUrl;
+                    }
+                    else
+                    {
+                        // A new session with no screenShareUrl means we can't offer the live-view card; log the
+                        // bounded result shape (a URL, not the ARI token — safe) to diagnose gateway payload drift.
+                        var raw = result switch
+                        {
+                            null => "(null)",
+                            string s => s,
+                            JsonElement je => je.GetRawText(),
+                            _ => JsonSerializer.Serialize(result, JsonOptions)
+                        };
+                        _logger.LogWarning("[Screenshare] no screenShareUrl in StartSession result for session {SessionId} — live-view offer unavailable; result: {Raw}",
+                            sessionId, raw.Length > 600 ? raw[..600] : raw);
+                    }
                 }
                 else
                 {
@@ -1564,7 +1693,17 @@ bool recovered = false;
             }
             else
             {
-                _logger.LogWarning("StartSession result did not contain a sessionId — auto-injection will not work this turn.");
+                // StartSession returned no sessionId — capture the backend result (bounded) so the -32000
+                // error + CorrelationId are visible for backend triage. No secret in the body.
+                var failBody = result switch
+                {
+                    null => "(null)",
+                    string s => s,
+                    JsonElement je => je.GetRawText(),
+                    _ => JsonSerializer.Serialize(result, JsonOptions)
+                };
+                _logger.LogWarning("StartSession returned no sessionId (auto-injection unavailable this turn) — backend result: {Result}",
+                    failBody.Length > 800 ? failBody[..800] : failBody);
             }
         }
         else if (string.Equals(toolName, W365EndSessionToolName, StringComparison.OrdinalIgnoreCase))
@@ -1602,6 +1741,13 @@ bool recovered = false;
                         "EndSession removed non-selected W365 sessionId {SessionId}; selected unchanged ({Selected}; remaining active: {Count}).",
                         endedId, state.W365SessionId, state.W365SessionIds.Count);
                 }
+
+                // F1: proactively revoke any live screenshare view bound to this Cloud PC session so the
+                // human's viewer tears down on the next heartbeat ("revoked") instead of waiting for the
+                // SDK to notice the session died or for SessionUntil to elapse.
+                var revoked = _ticketStore.RevokeBySession(endedId);
+                if (revoked > 0)
+                    _logger.LogInformation("[Screenshare] EndSession revoked {Count} live view(s) for session {SessionId}.", revoked, endedId);
             }
             else
             {

@@ -4,6 +4,7 @@
 using Microsoft.W365APlaygroundAgent.Agent;
 using Microsoft.W365APlaygroundAgent.Auth;
 using Microsoft.W365APlaygroundAgent.ComputerUse;
+using Microsoft.W365APlaygroundAgent.Screenshare;
 using Microsoft.W365APlaygroundAgent.Telemetry;
 using Microsoft.W365APlaygroundAgent.Throttling;
 using Microsoft.AspNetCore.RateLimiting;
@@ -14,6 +15,8 @@ using Microsoft.Agents.A365.Tooling.Services;
 using Microsoft.Agents.Builder;
 using Microsoft.Agents.Hosting.AspNetCore;
 using Microsoft.Agents.Storage;
+using Microsoft.AspNetCore.Authentication.OpenIdConnect;
+using Microsoft.Identity.Web;
 using System.Reflection;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -45,6 +48,14 @@ builder.Services.AddSingleton<IMcpToolServerConfigurationService, McpToolServerC
 // a distributed store (AzureTableStorage or Redis) so counts are shared across instances.
 builder.Services.AddSingleton<IUserTurnLimiter, UserTurnLimiter>();
 
+// Screenshare (Computer-See/Control): in-memory ticket store, singleton so tickets are shared
+// across the (transient) agent instances. State resets on restart (see IScreenshareTicketStore).
+builder.Services.AddSingleton<IScreenshareTicketStore, ScreenshareTicketStore>();
+builder.Services.Configure<ScreenshareOptions>(builder.Configuration.GetSection(ScreenshareOptions.SectionName));
+builder.Services.AddSingleton<ScreenshareService>();
+builder.Services.AddSingleton<IHirerResolver, GraphHirerResolver>();
+builder.Services.AddSingleton<IScreenshareIssuer, ScreenshareIssuer>();
+
 // Global HTTP rate limit on /api/messages: 5 req/min across all callers, no queueing.
 // Conservative ceiling for a demo agent — returns 429 immediately on overflow. To raise
 // it for your own workload, edit the constants below (PermitLimit / Window).
@@ -62,6 +73,36 @@ builder.Services.AddRateLimiter(options =>
 // ───── Auth & storage ─────
 // JWT validation for incoming Bot Framework / agentic tokens (config: TokenValidation:*).
 builder.Services.AddAgentAspNetAuthentication(builder.Configuration);
+
+// Screenshare interactive web sign-in (OIDC): the viewer page requires the opener to sign in so
+// we can prove they are the ticket's bound hirer. This adds the "OpenIdConnect" + "Cookies"
+// schemes WITHOUT changing the bot's default JwtBearer scheme — the ScreenshareController
+// authenticates with the cookie and challenges OIDC explicitly, so /api/messages is unaffected.
+// Guarded on a real ClientId so dev (placeholder config + DevBypassOid) skips OIDC entirely.
+var azureAdSection = builder.Configuration.GetSection("AzureAd");
+if (Guid.TryParse(azureAdSection["ClientId"], out _))
+{
+    builder.Services.AddAuthentication()
+        .AddMicrosoftIdentityWebApp(azureAdSection);
+    // Explicitly use the authorization-code flow (code redeemed server-side with the client secret) so the
+    // blueprint app registration doesn't need implicit ID-token issuance enabled — auth-code needs only the
+    // redirect URI + secret. Set explicitly rather than relying on the handler's default response_type.
+    builder.Services.Configure<OpenIdConnectOptions>(OpenIdConnectDefaults.AuthenticationScheme, o =>
+    {
+        o.ResponseType = "code";
+        // Let the ScreenshareController force the Entra account picker (prompt=select_account) when the
+        // signed-in opener is the wrong account — carry "prompt" from AuthenticationProperties into the
+        // outbound auth request, chaining Microsoft.Identity.Web's own redirect handler.
+        o.Events ??= new OpenIdConnectEvents();
+        var priorRedirect = o.Events.OnRedirectToIdentityProvider;
+        o.Events.OnRedirectToIdentityProvider = async ctx =>
+        {
+            if (priorRedirect is not null) await priorRedirect(ctx);
+            if (ctx.Properties.Items.TryGetValue("prompt", out var prompt) && !string.IsNullOrEmpty(prompt))
+                ctx.ProtocolMessage.Prompt = prompt;
+        };
+    });
+}
 
 // Conversation state. MemoryStorage is fine for development; for production use a durable
 // store (CosmosDbPartitionedStorage, BlobsStorage, etc.) so state survives restarts and
