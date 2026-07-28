@@ -3,7 +3,7 @@
 Windows 365 for Agents exposes two groups of endpoints:
 
 - **Session endpoints** (`/api/...`): checkout (allocate a Cloud PC) and checkin (release it). These use the **Session Base URL**.
-- **Device endpoints** (`/computers/...`): Get Computer Status, MCP tool calls, screen sharing, and partner capabilities on a specific device. These use the **Device Base URL** (a pool-scoped hostname) and require the `x-ms-computerId` header on every request.
+- **Device endpoints** (`/computers/...`): Get Computer Status, MCP tool calls, and screen sharing on a specific device. These use the **Device Base URL** (a pool-scoped hostname) and require the `x-ms-computerId` header on every request.
 
 | Surface | Plane | Called By | Purpose |
 |---------|-------|-----------|---------|
@@ -11,7 +11,6 @@ Windows 365 for Agents exposes two groups of endpoints:
 | **Get Computer Status** | Computer-Get | Partner application | Poll device readiness |
 | **MCP** | Computer-Do | AI agent | Operate the Cloud PC (62 tools) |
 | **Screen sharing** | Computer-See | Partner app (for a human) | Observe and co-drive |
-| **Partner Capability** | Computer-Do | Partner application | Call your own extension on the device |
 
 ## Environment URLs
 
@@ -31,7 +30,6 @@ Windows 365 for Agents exposes two groups of endpoints:
 | `GET` | `{computerUrl}/status?api-version=1.0` | **Status:** device readiness (Waiting / Live / Ready) |
 | `POST` | `{computerUrl}/mcp?api-version=1.0` | **MCP:** send JSON-RPC messages |
 | _(SDK)_ | Screenshare SDK (`screenshare-embed.js`) | **Screen sharing** (see [Screen Sharing](./screen-sharing.md)) |
-| `{VERB}` | `{computerUrl}/{capability}/{path}` | **Partner Capability** (see [Partner Capability](./partner-capability.md)) |
 
 > Session endpoints (`/api/...`) use the **Session Base URL**. Device endpoints (`{computerUrl}/...`) use the **Device Base URL** returned as `computerUrl` at checkout.
 
@@ -244,14 +242,6 @@ See the full guide: [Screen Sharing](./screen-sharing.md).
 
 ---
 
-## Partner Capability
-
-You can run your own HTTP or WebSocket service on the Cloud PC and call it through the device host, alongside MCP and screen sharing. Register the capability on the pool, then call it at `{computerUrl}/{capability}/{path}` with any of the five HTTP verbs.
-
-See the full guide: [Partner Capability](./partner-capability.md).
-
----
-
 ## Authorization for Device Endpoints
 
 Device endpoints (`{computerUrl}/...`) use pool-based authorization:
@@ -266,5 +256,4 @@ A `403` on a device endpoint means your app is not in the pool's `trustedApps`. 
 - [Authentication](./authentication.md) — token scenarios and required scopes
 - [MCP Tools Reference](./mcp-tools.md) — all 62 built-in tools
 - [Screen Sharing](./screen-sharing.md) — human-in-the-loop controls
-- [Partner Capability](./partner-capability.md) — run your own extension on the device
 - [Quick Start](./quickstart.md) — end-to-end Python example
