@@ -11,7 +11,7 @@ IT administrators and agent makers configure and manage the underlying Cloud PC 
 
 The platform is organized into **four cooperating subsystems**, each owning a distinct stage of the Cloud PC lifecycle.
 
-### 1. Computer-Create — Provisioning
+### 1. Computer-Create: Provisioning
 
 Responsible for creating and maintaining the [Cloud PC agent pool](./cloud-pc-pools.md). This is the control plane that IT admins and agent makers interact with.
 
@@ -26,7 +26,7 @@ Responsible for creating and maintaining the [Cloud PC agent pool](./cloud-pc-po
 | **Infrastructure Layer** | Provisions compute cost-efficiently at scale |
 | **Virtual Machines (Windows)** | End workloads with an on-box agent client for agentic control |
 
-### 2. Computer-Get — Assignment
+### 2. Computer-Get: Assignment
 
 Brokers available Cloud PCs from the pool to the caller that needs one.
 
@@ -34,11 +34,12 @@ Brokers available Cloud PCs from the pool to the caller that needs one.
 
 | Component | Purpose |
 |-----------|---------|
-| **MCP Server** | Exposes Cloud PC acquisition capabilities through the Model Context Protocol |
+| **Session API** | Exposes Cloud PC acquisition through checkout and checkin (`/api/pools/{poolId}/sessions`) |
 | **Check-in / Check-out** | Reserves a Cloud PC for a session and returns it to the pool when done |
+| **Get Computer Status** | Reports whether an assigned Cloud PC is Waiting, Live, or Ready |
 | **Assignment Engine** | Matches requests to the optimal Cloud PC based on capability, region, and availability |
 
-### 3. Computer-Do — Actions
+### 3. Computer-Do: Actions
 
 Executes commands on an assigned Cloud PC. This is the plane through which agents drive the operating system.
 
@@ -49,7 +50,7 @@ Executes commands on an assigned Cloud PC. This is the plane through which agent
 | **MCP Server** | Exposes the action API (click, type, navigate, run) to orchestrators |
 | **Relay & Protocol** | Transports action requests from the agent to the on-box client running inside the Cloud PC |
 
-### 4. Computer-See — Access & Control
+### 4. Computer-See: Access & Control
 
 Delivers the interactive pixel and device experience to humans.
 
@@ -59,6 +60,17 @@ Delivers the interactive pixel and device experience to humans.
 |-----------|---------|
 | **Remote Desktop** | Session delivery via AVD / RDP |
 | **Real-time Media** | Audio, video, and peripheral redirection |
+| **Screenshare SDK** | Browser-side viewer for real-time observation and shared control |
+
+## Device Capabilities
+
+Once a Cloud PC is assigned, the device exposes multiple capabilities through the same pool-scoped host. Each is authorized by your bearer token and the `x-ms-computerId` header:
+
+| Capability | Plane | Purpose | Reference |
+|------------|-------|---------|-----------|
+| **MCP** | Computer-Do | 62 built-in desktop and browser tools | [MCP Tools](./mcp-tools.md) |
+| **Screen sharing** | Computer-See | Real-time observation and shared control | [Screen Sharing](./screen-sharing.md) |
+| **Get Computer Status** | Computer-Get | Readiness of the assigned Cloud PC | [API Reference](./api-reference.md#get-computer-status) |
 
 ## Entry Points
 
@@ -72,40 +84,42 @@ Delivers the interactive pixel and device experience to humans.
 
 ```
      IT Admin                Partner App              AI Agent              Human
-        │                       │                       │                    │
-        ▼                       │                       │                    │
-  ┌─────────────┐               │                       │                    │
-  │  Computer-  │               │                       │                    │
-  │   Create    │               │                       │                    │
-  │ (Graph API) │               │                       │                    │
-  │  Pool Mgmt  │               │                       │                    │
-  └──────┬──────┘               │                       │                    │
-         │ provisions           │                       │                    │
-         ▼                      ▼                       │                    │
-  ┌──────────────────────────────────┐                  │                    │
-  │      Cloud PC Agent Pool         │                  │                    │
-  └──────────────┬───────────────────┘                  │                    │
-                 │                                      │                    │
-                 ▼                                      │                    │
-          ┌─────────────┐                               │                    │
-          │ Computer-Get│◄──────── Checkout ────────────┤                    │
-          │ (Sessions)  │──────── Checkin ──────────────┤                    │
-          └──────┬──────┘                               │                    │
-                 │ assigns Cloud PC                     │                    │
-                 ▼                                      ▼                    ▼
-          ┌──────────────────────────────────────────────────────────┐
-          │                     Cloud PC (VM)                        │
-          │  ┌───────────────────┐    ┌───────────────────────────┐  │
-          │  │   Computer-Do     │    │     Computer-See          │  │
-          │  │   (62 MCP Tools)  │    │  (Screen Share / WebRTC)  │  │
-          │  │   Desktop, Browser│    │  Start, Stop, TakeControl │  │
-          │  │   Accessibility   │    │  ReleaseControl           │  │
-          │  └───────────────────┘    └───────────────────────────┘  │
-          └──────────────────────────────────────────────────────────┘
+        |                       |                       |                    |
+        v                       |                       |                    |
+  +-------------+               |                       |                    |
+  |  Computer-  |               |                       |                    |
+  |   Create    |               |                       |                    |
+  | (Graph API) |               |                       |                    |
+  |  Pool Mgmt  |               |                       |                    |
+  +------+------+               |                       |                    |
+         | provisions           |                       |                    |
+         v                      v                       |                    |
+  +----------------------------------+                  |                    |
+  |      Cloud PC Agent Pool         |                  |                    |
+  +--------------+-------------------+                  |                    |
+                 |                                      |                    |
+                 v                                      |                    |
+          +-------------+                               |                    |
+          | Computer-Get|<-------- Checkout ------------+                    |
+          | (Sessions)  |-------- Checkin --------------+                    |
+          +------+------+                               |                    |
+                 | assigns Cloud PC                     |                    |
+                 v                                      v                    v
+          +----------------------------------------------------------+
+          |                      Cloud PC (VM)                       |
+          |    +-------------------+   +--------------------------+   |
+          |    |   Computer-Do     |   |      Computer-See        |   |
+          |    |   (62 MCP Tools)  |   |     (Screen Share)       |   |
+          |    |   Desktop,        |   |     Start, Stop,         |   |
+          |    |   Browser,        |   |     TakeControl,         |   |
+          |    |   Accessibility   |   |     ReleaseControl       |   |
+          |    +-------------------+   +--------------------------+   |
+          +----------------------------------------------------------+
 ```
 
 ## Next Steps
 
 - [Agent Session Lifecycle](./sessions.md)
+- [Authentication](./authentication.md)
 - [API Reference](./api-reference.md)
 - [MCP Tools](./mcp-tools.md)
