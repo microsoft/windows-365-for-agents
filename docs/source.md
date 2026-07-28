@@ -60,7 +60,7 @@ client_id={your-app-client-id}
 
 | Environment | Audience |
 |-------------|----------|
-| Test / Int | `api://W365Agents-Int` |
+| Int | `api://W365Agents-Int` |
 | PreProd / Prod | `api://W365Agents-Prod` |
 
 **Claims validated:** `aud` (must match environment audience), `azp`/`appid` (must be a registered trusted caller), `idtyp` (token type), `roles`.

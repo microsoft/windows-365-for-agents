@@ -28,7 +28,7 @@ client_id={your-app-client-id}
 
 | Environment | Audience |
 |-------------|----------|
-| Test / Int | `api://W365Agents-Int` |
+| Int | `api://W365Agents-Int` |
 | PreProd / Prod | `api://W365Agents-Prod` |
 
 ## End-to-End Python Example
