@@ -29,10 +29,12 @@ From an admin perspective, you manage the pool as a single resource rather than 
 
 ## Creating a Cloud PC Agent Pool
 
+> **Preview note:** During public preview, partner pools are provisioned for you by the Windows 365 for Agents team as part of [onboarding](./onboarding.md). The self-service options below are the direction for general availability.
+
 You can create a Cloud PC agent pool in either of the following ways:
 
-1. **Microsoft Intune admin center** — [Create a provisioning policy (Agents)](./provisioning.md)
-2. **Graph APIs** — Programmatic pool creation
+1. **Microsoft Intune admin center**: [Create a provisioning policy (Agents)](./provisioning.md)
+2. **Graph APIs**: Programmatic pool creation
 
 ## Cloud PC Agent Pool Status
 
@@ -45,6 +47,10 @@ Pool status reflects the overall health and availability of the pool. Status is 
 | **Provisioning paused** | Yes | Recommended |
 | **Failed** | No | Required |
 | **Deleting** | No | None |
+
+## Partner Capabilities and Pools
+
+If your integration ships a [partner capability](./partner-capability.md), which is a custom HTTP or WebSocket extension that runs on the Cloud PC, it is registered against the pool and started in the user session on checkout. Register or update capabilities on the pool before you check out sessions.
 
 ## Updating a Cloud PC Agent Pool
 
@@ -61,5 +67,6 @@ When you delete a Cloud PC agent pool or provisioning policy (Agents), Windows 3
 ## Next Steps
 
 - [Create a Provisioning Policy (Agents)](./provisioning.md)
+- [Partner Capability](./partner-capability.md)
 - [Agent Session Lifecycle](./sessions.md)
 - [API Reference](./api-reference.md)
