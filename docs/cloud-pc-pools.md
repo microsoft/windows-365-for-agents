@@ -29,10 +29,12 @@ From an admin perspective, you manage the pool as a single resource rather than 
 
 ## Creating a Cloud PC Agent Pool
 
+> **Preview note:** During public preview, partner pools are provisioned for you by the Windows 365 for Agents team as part of [onboarding](./onboarding.md). The self-service options below are the direction for general availability.
+
 You can create a Cloud PC agent pool in either of the following ways:
 
-1. **Microsoft Intune admin center** — [Create a provisioning policy (Agents)](./provisioning.md)
-2. **Graph APIs** — Programmatic pool creation
+1. **Microsoft Intune admin center**: [Create a provisioning policy (Agents)](./provisioning.md)
+2. **Graph APIs**: Programmatic pool creation
 
 ## Cloud PC Agent Pool Status
 
