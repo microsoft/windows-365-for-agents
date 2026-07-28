@@ -64,13 +64,6 @@ A: Screen sharing and shared control use an agent token carrying the `Computer.S
 
 ---
 
-## Partner Capabilities
-
-**Q: Can I run my own service on the Cloud PC?**
-A: Yes. Register a partner capability on the pool, then call it through the device host at `{computerUrl}/{capability}/{path}`. See [Partner Capability](./partner-capability.md).
-
----
-
 ## Infrastructure
 
 **Q: What regions are available?**
