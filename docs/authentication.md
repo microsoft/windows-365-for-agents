@@ -13,7 +13,7 @@ Authentication is organized by the plane you are calling. Most partners only nee
 | **App-only token** | `Authorization: Bearer {token}` | Standard service-to-service. Most partners use this. |
 | **PFAT** | `Authorization: MSAuth_1_0_PFAT AccessToken={user-token}&ActorToken={actor-token}` | On-behalf-of-user (acting as a signed-in user). Both tokens must target environment-specific audiences. The access token carries the human or agentic user sign-in; the actor token is app-only. |
 
-### Computer.Do (MCP tool calls and partner capabilities)
+### Computer.Do (MCP tool calls)
 
 | Scheme | Format | Use Case |
 |--------|--------|----------|
@@ -132,7 +132,7 @@ Use the same **audiences by environment** table above for `{ari-resource-app-id}
 
 ## Pool-Based Authorization for Device Endpoints
 
-Device endpoints (`{computerUrl}/...`, which cover status, MCP, screen sharing, and partner capabilities) use pool-based authorization. You do not need a separate token; the same Bearer token works, but your app must be authorized for the pool.
+Device endpoints (`{computerUrl}/...`, which cover status, MCP, and screen sharing) use pool-based authorization. You do not need a separate token; the same Bearer token works, but your app must be authorized for the pool.
 
 **How it works:**
 
