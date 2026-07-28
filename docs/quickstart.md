@@ -187,4 +187,3 @@ httpx.delete(
 - [Architecture Overview](./architecture.md) — understand the four-plane design
 - [MCP Tools Reference](./mcp-tools.md) — explore all 62 built-in tools
 - [API Reference](./api-reference.md) — full endpoint documentation
-- [Partner Capability](./partner-capability.md) — run your own extension on the Cloud PC
