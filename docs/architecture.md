@@ -49,7 +49,6 @@ Executes commands on an assigned Cloud PC. This is the plane through which agent
 |-----------|---------|
 | **MCP Server** | Exposes the action API (click, type, navigate, run) to orchestrators |
 | **Relay & Protocol** | Transports action requests from the agent to the on-box client running inside the Cloud PC |
-| **Partner Capabilities** | Optional custom HTTP or WebSocket extensions you run on the Cloud PC, called through the same relay (see [Partner Capability](./partner-capability.md)) |
 
 ### 4. Computer-See: Access & Control
 
@@ -71,7 +70,6 @@ Once a Cloud PC is assigned, the device exposes multiple capabilities through th
 |------------|-------|---------|-----------|
 | **MCP** | Computer-Do | 62 built-in desktop and browser tools | [MCP Tools](./mcp-tools.md) |
 | **Screen sharing** | Computer-See | Real-time observation and shared control | [Screen Sharing](./screen-sharing.md) |
-| **Partner Capability** | Computer-Do | Your own extension service on the Cloud PC | [Partner Capability](./partner-capability.md) |
 | **Get Computer Status** | Computer-Get | Readiness of the assigned Cloud PC | [API Reference](./api-reference.md#get-computer-status) |
 
 ## Entry Points
@@ -109,13 +107,13 @@ Once a Cloud PC is assigned, the device exposes multiple capabilities through th
                  v                                      v                    v
           +----------------------------------------------------------+
           |                      Cloud PC (VM)                       |
-          |  +---------------+ +---------------+ +------------------+ |
-          |  |  Computer-Do  | |   Partner     | |   Computer-See   | |
-          |  | (62 MCP Tools)| |  Capability   | | (Screen Share)   | |
-          |  |  Desktop,     | | (your HTTP /  | |  Start, Stop,    | |
-          |  |  Browser,     | |  WebSocket    | |  TakeControl,    | |
-          |  |  Accessibility| |  extension)   | |  ReleaseControl  | |
-          |  +---------------+ +---------------+ +------------------+ |
+          |    +-------------------+   +--------------------------+   |
+          |    |   Computer-Do     |   |      Computer-See        |   |
+          |    |   (62 MCP Tools)  |   |     (Screen Share)       |   |
+          |    |   Desktop,        |   |     Start, Stop,         |   |
+          |    |   Browser,        |   |     TakeControl,         |   |
+          |    |   Accessibility   |   |     ReleaseControl       |   |
+          |    +-------------------+   +--------------------------+   |
           +----------------------------------------------------------+
 ```
 
@@ -125,4 +123,3 @@ Once a Cloud PC is assigned, the device exposes multiple capabilities through th
 - [Authentication](./authentication.md)
 - [API Reference](./api-reference.md)
 - [MCP Tools](./mcp-tools.md)
-- [Partner Capability](./partner-capability.md)
