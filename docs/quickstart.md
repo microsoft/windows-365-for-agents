@@ -6,13 +6,13 @@ Get from zero to your first agent session in minutes.
 
 | Requirement | Description |
 |-------------|-------------|
-| Entra ID app registration | Register your service in Microsoft Entra ID. Note your Application (client) ID, Object ID, and Tenant ID. |
-| Cloud PC agent pool | A provisioned pool with Cloud PCs available for checkout. See [Provisioning](./provisioning.md). |
+| Entra ID app registration | Register your service in Microsoft Entra ID. Note your Application (client) ID, Object ID, and Tenant ID. See [Onboarding](./onboarding.md). |
+| Cloud PC agent pool | A provisioned pool with Cloud PCs available for checkout. See [Onboarding](./onboarding.md). |
 | Python 3.10+ | With `httpx` installed: `pip install httpx` |
 
 ## Authentication
 
-Windows 365 for Agents uses **Bearer token (S2S)** authentication. Acquire a token from Microsoft Entra:
+Windows 365 for Agents uses **Bearer token (service-to-service)** authentication for standard partner scenarios. Acquire an app-only token from Microsoft Entra, targeting the ARI resource app for your environment:
 
 ```
 POST https://login.microsoftonline.com/{tenantId}/oauth2/v2.0/token
@@ -20,16 +20,18 @@ Content-Type: application/x-www-form-urlencoded
 
 client_id={your-app-client-id}
 &client_secret={your-app-secret}
-&scope=api://W365Agents-Prod/.default
+&scope={ari-resource-app-id}/.default
 &grant_type=client_credentials
 ```
 
-**Token audiences by environment:**
+**Audiences by environment:**
 
 | Environment | Audience |
 |-------------|----------|
-| Int | `api://W365Agents-Int` |
-| PreProd / Prod | `api://W365Agents-Prod` |
+| Test / Int | `api://274133f7-12bb-4bfb-ae3b-bd446b7e8a75` |
+| PreProd / Prod | `api://90ecec28-f5a6-42b3-9bde-dae1ca98f8b5` |
+
+For the full set of authentication scenarios (app-only, on-behalf-of, and the agent-token flow used for screen sharing and shared control), see [Authentication](./authentication.md).
 
 ## End-to-End Python Example
 
@@ -53,14 +55,17 @@ token_resp = httpx.post(
     data={
         "client_id": CLIENT_ID,
         "client_secret": CLIENT_SECRET,
-        "scope": "api://W365Agents-Int/.default",  # Test and Int share the same audience
+        # Test and Int share this audience (the ARI resource app for the environment)
+        "scope": "api://274133f7-12bb-4bfb-ae3b-bd446b7e8a75/.default",
         "grant_type": "client_credentials",
     },
 )
 TOKEN = token_resp.json()["access_token"]
 
 # --- 2. Checkout session ---
-# IMPORTANT: Always pass x-ms-sessionId. Without it, every call creates a new session.
+# RECOMMENDED: pass x-ms-sessionId for idempotency. It is optional, but without it a
+# network retry can allocate a second, orphaned device. Passing it also lets you
+# retrieve the same session later.
 session_id = str(uuid.uuid4())
 checkout_resp = httpx.post(
     f"{SESSION_BASE}/api/pools/{POOL_ID}/sessions",
@@ -73,8 +78,8 @@ checkout_resp = httpx.post(
     timeout=35.0,  # Checkout may take up to 30 seconds
 )
 session = checkout_resp.json()
-computer_url = session["computerUrl"]
-computer_id  = computer_url.split("/computers/")[1]
+computer_url = session["computerUrl"]                    # no api-version on this URL
+computer_id  = computer_url.split("/computers/")[1]      # the bare computerId (GUID)
 
 # --- 3. Create MCP client ---
 class W365AMcpClient:
@@ -82,6 +87,8 @@ class W365AMcpClient:
     remote MCP server via HTTP POST."""
 
     def __init__(self, computer_url: str, computer_id: str, token: str):
+        # Append /mcp to the computerUrl from checkout, and send x-ms-computerId
+        # on every device call (MCP, screen sharing, and status).
         self.endpoint = f"{computer_url}/mcp"
         self.headers = {
             "Authorization": f"Bearer {token}",
@@ -156,12 +163,12 @@ httpx.delete(
     params={"api-version": "2.0"},
     headers={
         "Authorization": f"Bearer {TOKEN}",
-        "x-ms-sessionId": session_id,  # Required; must match sessionId in path
+        "x-ms-sessionId": session_id,  # Required on checkin; must match sessionId in path
     },
 )
 ```
 
-> **Important:** The MCP endpoint is HTTP POST-only. Each POST sends one JSON-RPC message and receives one JSON-RPC response. Standard MCP stdio or WebSocket client libraries are **not** compatible — use HTTP POST as shown above.
+> **Important:** The MCP endpoint is HTTP POST-only. Each POST sends one JSON-RPC message and receives one JSON-RPC response. Standard MCP stdio or WebSocket client libraries are **not** compatible. Use HTTP POST as shown above.
 
 ## What Just Happened?
 
@@ -175,7 +182,8 @@ httpx.delete(
 
 ## Next Steps
 
+- [Authentication](./authentication.md) — all token scenarios and required scopes
+- [Onboarding](./onboarding.md) — how to get a test pool
 - [Architecture Overview](./architecture.md) — understand the four-plane design
 - [MCP Tools Reference](./mcp-tools.md) — explore all 62 built-in tools
 - [API Reference](./api-reference.md) — full endpoint documentation
-- [Security](./security.md) — identity and Zero Trust model
