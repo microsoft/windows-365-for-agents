@@ -12,8 +12,8 @@ Move cursor to screen position. Use `click` instead if you intend to click.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `x` | int | Yes | — | X in screen pixels |
-| `y` | int | Yes | — | Y in screen pixels |
+| `x` | int | Yes | - | X in screen pixels |
+| `y` | int | Yes | - | Y in screen pixels |
 
 **Returns:** Text confirmation.
 
@@ -40,22 +40,22 @@ Drag from start to end. Also useful for pixel-precise scrolling.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `startX` | int | Yes | — | Start X |
-| `startY` | int | Yes | — | Start Y |
-| `endX` | int | Yes | — | End X |
-| `endY` | int | Yes | — | End Y |
-| `button` | string | No | `"Left"` | `Left`, `Right`, `Middle` |
+| `startX` | int | Yes | - | Start X |
+| `startY` | int | Yes | - | Start Y |
+| `endX` | int | Yes | - | End X |
+| `endY` | int | Yes | - | End Y |
+| `button` | string | No | `"Left"` | `Left`, `Right`, `Middle`, `Backward`, `Forward` |
 
 ### `scroll`
 
-Scroll in notches (NOT pixels). 3 notches ≈ one page. Positive `deltaY` = down, `deltaX` = right. Clamped to [-20, 20].
+Scroll in notches (NOT pixels). 3 notches is about one page. Positive `scrollY` = down, `scrollX` = right. Clamped to [-20, 20].
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `x` | int | Yes | — | Scroll position X |
-| `y` | int | Yes | — | Scroll position Y |
-| `deltaX` | int | No | 0 | Horizontal notches |
-| `deltaY` | int | No | 0 | Vertical notches |
+| `x` | int | Yes | - | Scroll position X |
+| `y` | int | Yes | - | Scroll position Y |
+| `scrollX` | int | No | 0 | Horizontal notches (positive = right) |
+| `scrollY` | int | No | 0 | Vertical notches (positive = down) |
 
 ### `type_text`
 
@@ -63,7 +63,7 @@ Type text via keyboard simulation. For shortcuts use `press_keys`. For browser f
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `text` | string | Yes | — | Text to type |
+| `text` | string | Yes | - | Text to type |
 
 ### `press_keys`
 
@@ -71,7 +71,7 @@ Press key combination simultaneously. E.g. `["ctrl", "c"]`, `["alt", "tab"]`.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `keys` | string[] | Yes | — | Key names to press together |
+| `keys` | string[] | Yes | - | Key names to press together |
 
 ### `take_screenshot`
 
@@ -94,10 +94,10 @@ Capture a screen region at native resolution as PNG. Use to inspect small text o
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `x` | int | Yes | — | Left edge X in screen pixels |
-| `y` | int | Yes | — | Top edge Y in screen pixels |
-| `width` | int | Yes | — | Width in pixels |
-| `height` | int | Yes | — | Height in pixels |
+| `x` | int | Yes | - | Left edge X in screen pixels |
+| `y` | int | Yes | - | Top edge Y in screen pixels |
+| `width` | int | Yes | - | Width in pixels |
+| `height` | int | Yes | - | Height in pixels |
 
 **Returns:** MCP image content block (base64 PNG).
 
@@ -115,7 +115,7 @@ Bring window to foreground by fuzzy title match.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `title` | string | Yes | — | Partial title (case-insensitive substring) |
+| `title` | string | Yes | - | Partial title (case-insensitive substring) |
 
 ### `close_window`
 
@@ -123,7 +123,7 @@ Graceful close. Protected system processes cannot be closed.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `title` | string | Yes | — | Partial title (80% match threshold) |
+| `title` | string | Yes | - | Partial title (80% match threshold) |
 
 **Returns:** JSON `{matchedTitle, processName, closed}`.
 
@@ -133,8 +133,8 @@ Resize, move, maximize, minimize, or restore a window by fuzzy title match.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `title` | string | Yes | — | Window title to match (case-insensitive fuzzy match) |
-| `action` | string | Yes | — | Action: `Resize`, `Move`, `Maximize`, `Minimize`, `Restore` |
+| `title` | string | Yes | - | Window title to match (case-insensitive fuzzy match) |
+| `action` | string | Yes | - | Action: `Resize`, `Move`, `Maximize`, `Minimize`, `Restore` |
 | `x` | int | No | null | Left edge X (for Resize/Move) |
 | `y` | int | No | null | Top edge Y (for Resize/Move) |
 | `width` | int | No | null | Width (for Resize) |
@@ -152,7 +152,7 @@ Run a shell command with piping (`|`) and chaining (`&&`, `||`, `&`). Default ti
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `command` | string | Yes | — | Command to execute |
+| `command` | string | Yes | - | Command to execute |
 | `cwd` | string | No | null | Working directory. Use forward slashes (`C:/Users/me/project`). |
 | `timeoutMs` | int | No | 30000 | Timeout in ms (max 120000) |
 
@@ -166,7 +166,7 @@ Execute Python code in a sandboxed process (512 MB memory, max 120s, 262,144 cha
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `code` | string | Yes | — | Python code (max 262,144 chars) |
+| `code` | string | Yes | - | Python code (max 262,144 chars) |
 | `cwd` | string | No | null | Working directory. Use forward slashes. |
 | `timeoutMs` | int | No | 30000 | Timeout in ms (max 120000) |
 
@@ -174,11 +174,11 @@ Execute Python code in a sandboxed process (512 MB memory, max 120s, 262,144 cha
 
 ### `wait_milliseconds`
 
-One-shot pause. Do NOT loop — use `browser_wait_for` for polling. Clamped to [0, 5000].
+One-shot pause. Do NOT loop; use `browser_wait_for` for polling. Clamped to [0, 5000].
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `ms` | int | Yes | — | Duration in ms (max 5000) |
+| `ms` | int | Yes | - | Duration in ms (max 5000) |
 
 ### `clipboard_read`
 
@@ -192,7 +192,7 @@ Write text to the system clipboard, replacing current content.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `text` | string | Yes | — | Text to write to clipboard |
+| `text` | string | Yes | - | Text to write to clipboard |
 
 **Returns:** Text confirmation with character count.
 
@@ -212,8 +212,8 @@ Terminate a process by PID. Requires `startTime` from `list_processes` to preven
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `pid` | int | Yes | — | Process ID from `list_processes` |
-| `startTime` | long | Yes | — | Process start time ticks from `list_processes` (prevents PID recycling) |
+| `pid` | int | Yes | - | Process ID from `list_processes` |
+| `startTime` | long | Yes | - | Process start time ticks from `list_processes` (prevents PID recycling) |
 | `force` | bool | No | false | Force kill without graceful shutdown |
 
 **Returns:** JSON result.
@@ -224,7 +224,7 @@ Launch a GUI application from allowed directories. Use `execute_shell_command` f
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `path` | string | Yes | — | Absolute path to the executable. Use forward slashes (`C:/Program Files/app.exe`). |
+| `path` | string | Yes | - | Absolute path to the executable. Use forward slashes (`C:/Program Files/app.exe`). |
 | `args` | string[] | No | null | Command-line arguments |
 
 **Returns:** JSON `{path, pid}`.
@@ -254,8 +254,8 @@ Get UI element tree for the foreground window.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `maxDepth` | int | No | 3 | Max tree depth (1–10) |
-| `maxElements` | int | No | 500 | Max elements (1–2000) |
+| `maxDepth` | int | No | 3 | Max tree depth (1 to 10) |
+| `maxElements` | int | No | 500 | Max elements (1 to 2000) |
 
 **Returns:** JSON tree `{role, name, value, x, y, width, height, children[...]}`.
 
@@ -271,7 +271,7 @@ Navigate to a URL and wait for the page to load.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `url` | string | Yes | — | Full URL including protocol |
+| `url` | string | Yes | - | Full URL including protocol |
 | `waitUntil` | string | No | `"load"` | Wait condition: `load`, `networkidle0`, `networkidle2` |
 
 **Returns:** Text confirmation.
@@ -302,7 +302,7 @@ Click a DOM element by CSS selector. More reliable than coordinate-based `click`
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `selector` | string | Yes | — | CSS selector (e.g. `#submit-btn`) |
+| `selector` | string | Yes | - | CSS selector (e.g. `#submit-btn`) |
 | `button` | string | No | `"Left"` | `Left`, `Right`, `Middle`, `Backward`, `Forward` |
 | `clickCount` | int | No | 1 | 1=single, 2=double, 3=triple |
 
@@ -314,8 +314,8 @@ Type text into a DOM element by CSS selector. Clears existing text by default.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `selector` | string | Yes | — | CSS selector of input element |
-| `text` | string | Yes | — | Text to type |
+| `selector` | string | Yes | - | CSS selector of input element |
+| `text` | string | Yes | - | Text to type |
 | `clear` | bool | No | true | Clear existing text before typing |
 
 **Returns:** Text confirmation.
@@ -326,7 +326,7 @@ Return `innerText` of the first element matching a CSS selector.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `query` | string | Yes | — | CSS selector (e.g. `h1`, `#content`, `.message`) |
+| `query` | string | Yes | - | CSS selector (e.g. `h1`, `#content`, `.message`) |
 
 **Returns:** `innerText` of first matching element, empty if no match.
 
@@ -336,7 +336,7 @@ Wait for a DOM element matching CSS selector to appear (default 5s, max 30s).
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `selector` | string | Yes | — | CSS selector to wait for |
+| `selector` | string | Yes | - | CSS selector to wait for |
 | `timeoutMs` | int | No | 5000 | Timeout in ms (max 30000) |
 | `visible` | bool | No | false | Wait for element to be visible, not just in DOM |
 
@@ -346,7 +346,7 @@ Wait for a DOM element matching CSS selector to appear (default 5s, max 30s).
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `expression` | string | Yes | — | JavaScript expression returning a string |
+| `expression` | string | Yes | - | JavaScript expression returning a string |
 
 **Returns:** String result of evaluated expression.
 
@@ -358,7 +358,7 @@ No parameters. **Returns:** JSON array `[{tabId, title, url}]`.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `tabId` | string | Yes | — | Tab ID from `browser_list_tabs` |
+| `tabId` | string | Yes | - | Tab ID from `browser_list_tabs` |
 
 **Returns:** Text confirmation. `browser_close_tab` fails if it is the last remaining tab.
 
@@ -378,7 +378,7 @@ Open multiple tabs at once.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `urls` | string[] | Yes | — | URLs to open, one per tab |
+| `urls` | string[] | Yes | - | URLs to open, one per tab |
 | `foregroundIndex` | int | No | null | Index of tab to bring to foreground after creation |
 
 **Returns:** Text confirmation.
@@ -393,8 +393,8 @@ Select one or more options in a `<select>` element by their `value` attribute.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `selector` | string | Yes | — | CSS selector for the `<select>` element |
-| `values` | string[] | Yes | — | Option value(s) to select |
+| `selector` | string | Yes | - | CSS selector for the `<select>` element |
+| `values` | string[] | Yes | - | Option value(s) to select |
 
 **Returns:** Text confirmation with count of selected options.
 
@@ -404,7 +404,7 @@ Fill multiple form fields at once. Each entry is a `{selector, value}` pair. Sto
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `fields` | object[] | Yes | — | Array of `{selector, value}` pairs |
+| `fields` | object[] | Yes | - | Array of `{selector, value}` pairs |
 
 **Returns:** Text confirmation with count of filled fields.
 
@@ -414,8 +414,8 @@ Drag a source element onto a target element, both identified by CSS selector.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `sourceSelector` | string | Yes | — | CSS selector of the drag source |
-| `targetSelector` | string | Yes | — | CSS selector of the drop target |
+| `sourceSelector` | string | Yes | - | CSS selector of the drag source |
+| `targetSelector` | string | Yes | - | CSS selector of the drop target |
 
 **Returns:** Text confirmation.
 
@@ -425,7 +425,7 @@ Save the current page as PDF under `%USERPROFILE%` or `%TEMP%` only.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `filePath` | string | Yes | — | Destination file path under `%USERPROFILE%` or `%TEMP%`. Use forward slashes. |
+| `filePath` | string | Yes | - | Destination file path under `%USERPROFILE%` or `%TEMP%`. Use forward slashes. |
 
 **Returns:** Text confirmation with saved file path.
 
@@ -435,7 +435,7 @@ Accept or dismiss a pending browser dialog (alert, confirm, prompt, beforeunload
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `action` | string | Yes | — | `accept` or `dismiss` |
+| `action` | string | Yes | - | `accept` or `dismiss` |
 | `promptText` | string | No | null | Text for prompt dialogs (ignored for alert/confirm) |
 
 **Returns:** Text confirmation indicating dialog action taken.
@@ -446,7 +446,7 @@ Capture accessibility tree with ref IDs (e.g. `e5`) that map to DOM nodes. Use r
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `maxDepth` | int | No | 5 | Maximum tree depth 1–10 |
+| `maxDepth` | int | No | 5 | Maximum tree depth 1 to 10 |
 | `includeIframes` | bool | No | true | Include cross-origin iframes |
 | `redactValues` | bool | No | true | Redact values in text inputs |
 
@@ -454,12 +454,12 @@ Capture accessibility tree with ref IDs (e.g. `e5`) that map to DOM nodes. Use r
 
 ### `browser_click_ref`
 
-Click element by ref ID from `browser_snapshot`. Verifies nothing overlays it (hit-test). Fails if snapshot expired — retake with `browser_snapshot`.
+Click element by ref ID from `browser_snapshot`. Verifies nothing overlays it (hit-test). Fails if snapshot expired; retake with `browser_snapshot`.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `snapshotId` | string | Yes | — | Snapshot ID from `browser_snapshot` |
-| `ref` | string | Yes | — | Element ref (e.g. `e5`) from snapshot nodes |
+| `snapshotId` | string | Yes | - | Snapshot ID from `browser_snapshot` |
+| `ref` | string | Yes | - | Element ref (e.g. `e5`) from snapshot nodes |
 | `button` | string | No | `"Left"` | Left, Right, Middle |
 | `clickCount` | int | No | 1 | 1=single, 2=double |
 
@@ -471,21 +471,21 @@ Type text into element by ref ID from `browser_snapshot`. Focuses element first,
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `snapshotId` | string | Yes | — | Snapshot ID from `browser_snapshot` |
-| `ref` | string | Yes | — | Element ref (e.g. `e5`) from snapshot nodes |
-| `text` | string | Yes | — | Text to type |
+| `snapshotId` | string | Yes | - | Snapshot ID from `browser_snapshot` |
+| `ref` | string | Yes | - | Element ref (e.g. `e5`) from snapshot nodes |
+| `text` | string | Yes | - | Text to type |
 | `clear` | bool | No | true | Clear existing text first |
 
 **Returns:** Text confirmation with character count.
 
 ### `browser_hover_ref`
 
-Hover over element by ref ID from `browser_snapshot`. Returns immediately. Fails if snapshot expired — retake with `browser_snapshot`.
+Hover over element by ref ID from `browser_snapshot`. Returns immediately. Fails if snapshot expired; retake with `browser_snapshot`.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `snapshotId` | string | Yes | — | Snapshot ID from `browser_snapshot` |
-| `ref` | string | Yes | — | Element ref (e.g. `e5`) from snapshot nodes |
+| `snapshotId` | string | Yes | - | Snapshot ID from `browser_snapshot` |
+| `ref` | string | Yes | - | Element ref (e.g. `e5`) from snapshot nodes |
 
 **Returns:** Text confirmation with coordinates.
 
@@ -495,9 +495,9 @@ Press a single key on element by ref. Focuses element first. Supports modifiers.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `snapshotId` | string | Yes | — | Snapshot ID from `browser_snapshot` |
-| `ref` | string | Yes | — | Element ref (e.g. `e5`) |
-| `key` | string | Yes | — | Key name: `Enter`, `Escape`, `Tab`, `ArrowUp`/`Down`, `F1`–`F12`, etc. |
+| `snapshotId` | string | Yes | - | Snapshot ID from `browser_snapshot` |
+| `ref` | string | Yes | - | Element ref (e.g. `e5`) |
+| `key` | string | Yes | - | Key name: `Enter`, `Escape`, `Tab`, `ArrowUp`/`Down`, `F1` to `F12`, etc. |
 | `modifiers` | string[] | No | null | Modifier keys: `Ctrl`, `Shift`, `Alt`, `Meta` |
 
 **Returns:** Text confirmation.
@@ -508,8 +508,8 @@ Scroll element into view by ref, optionally scroll by delta within element.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `snapshotId` | string | Yes | — | Snapshot ID from `browser_snapshot` |
-| `ref` | string | Yes | — | Element ref (e.g. `e5`) |
+| `snapshotId` | string | Yes | - | Snapshot ID from `browser_snapshot` |
+| `ref` | string | Yes | - | Element ref (e.g. `e5`) |
 | `deltaX` | int | No | 0 | Horizontal scroll delta in pixels |
 | `deltaY` | int | No | 0 | Vertical scroll delta in pixels |
 
@@ -521,9 +521,9 @@ Set files on a file input element by ref. Files must exist in Documents, Downloa
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `snapshotId` | string | Yes | — | Snapshot ID from `browser_snapshot` |
-| `ref` | string | Yes | — | Element ref for the file input |
-| `filePaths` | string[] | Yes | — | File paths to upload |
+| `snapshotId` | string | Yes | - | Snapshot ID from `browser_snapshot` |
+| `ref` | string | Yes | - | Element ref for the file input |
+| `filePaths` | string[] | Yes | - | File paths to upload |
 
 **Returns:** Text confirmation.
 
@@ -533,7 +533,7 @@ Get multiple page state fields in one call.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `fields` | string[] | Yes | — | Fields to return: `url`, `title`, `dom`, `screenshot`, `tabs` |
+| `fields` | string[] | Yes | - | Fields to return: `url`, `title`, `dom`, `screenshot`, `tabs` |
 
 **Returns:** Object with requested fields.
 
@@ -549,11 +549,11 @@ Get cookies for current page or specified URLs. Values are always redacted for s
 
 ### `browser_set_cookies`
 
-Set cookies on the current page's domain. Adds/overwrites — does not clear existing cookies.
+Set cookies on the current page's domain. Adds/overwrites; does not clear existing cookies.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `cookies` | object[] | Yes | — | Array of cookie objects: `{name(req), value(req), domain, path, secure, httpOnly, sameSite}` |
+| `cookies` | object[] | Yes | - | Array of cookie objects: `{name(req), value(req), domain, path, secure, httpOnly, sameSite}` |
 
 **Returns:** Text confirmation.
 
@@ -563,7 +563,7 @@ Execute multiple browser actions sequentially. Stops on first failure.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `actions` | object[] | Yes | — | Array of `{action, params}`. Allowed: `navigate`, `snapshot`, `click_ref`, `type_ref`, `hover_ref`, `scroll_ref`, `keypress_ref`, `wait_for`, `eval_js`. |
+| `actions` | object[] | Yes | - | Array of `{action, params}`. Allowed: `navigate`, `snapshot`, `click_ref`, `type_ref`, `hover_ref`, `scroll_ref`, `keypress_ref`, `wait_for`, `eval_js`. |
 
 **Returns:** Array of results per action.
 
@@ -588,6 +588,6 @@ Focus a browser window (Edge, Chrome, Firefox). Optionally filter by URL or titl
 
 ## Next Steps
 
-- [API Reference](./api-reference.md) — endpoint details
-- [Quick Start](./quickstart.md) — copy-paste Python example
-- [Screen Sharing](./screen-sharing.md) — human observation
+- [API Reference](./api-reference.md): endpoint details
+- [Quick Start](./quickstart.md): copy-paste Python example
+- [Screen Sharing](./screen-sharing.md): human observation
