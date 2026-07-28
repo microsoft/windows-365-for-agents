@@ -48,10 +48,6 @@ Pool status reflects the overall health and availability of the pool. Status is 
 | **Failed** | No | Required |
 | **Deleting** | No | None |
 
-## Partner Capabilities and Pools
-
-If your integration ships a [partner capability](./partner-capability.md), which is a custom HTTP or WebSocket extension that runs on the Cloud PC, it is registered against the pool and started in the user session on checkout. Register or update capabilities on the pool before you check out sessions.
-
 ## Updating a Cloud PC Agent Pool
 
 When you edit a provisioning policy (Agents), some properties require you to reprovision the pool to update existing Cloud PCs. Windows 365 does not automatically reprovision Cloud PCs when you update the provisioning policy.
@@ -67,6 +63,5 @@ When you delete a Cloud PC agent pool or provisioning policy (Agents), Windows 3
 ## Next Steps
 
 - [Create a Provisioning Policy (Agents)](./provisioning.md)
-- [Partner Capability](./partner-capability.md)
 - [Agent Session Lifecycle](./sessions.md)
 - [API Reference](./api-reference.md)
