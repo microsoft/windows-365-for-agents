@@ -14,8 +14,6 @@ To manage and allocate these resources, you create [provisioning policies](./pro
 
 Agents interact with Cloud PCs using a **check-in / check-out model**. When an agent needs to perform a task, it checks out a Cloud PC; once the task is complete, the agent checks the Cloud PC back in, making it available for others. This approach maximizes resource efficiency and keeps costs predictable.
 
-> **Note:** This feature is in [public preview](https://learn.microsoft.com/en-us/windows-365/public-preview).
-
 ## Platform Capabilities
 
 Windows 365 for Agents enables agent makers to:
