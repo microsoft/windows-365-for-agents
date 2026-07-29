@@ -1,37 +1,28 @@
 # Quick Start
 
-Get from zero to your first agent session in minutes.
+Get from zero to your first agent session against Windows 365 for Agents.
 
 ## Prerequisites
 
 | Requirement | Description |
 |-------------|-------------|
 | Entra ID app registration | Register your service in Microsoft Entra ID. Note your Application (client) ID, Object ID, and Tenant ID. See [Onboarding](./onboarding.md). |
-| Cloud PC agent pool | A provisioned pool with Cloud PCs available for checkout. See [Onboarding](./onboarding.md). |
+| Access to the server | Your app must be authorized to call the Windows 365 for Agents server for your tenant. See [Onboarding](./onboarding.md). |
 | Python 3.10+ | With `httpx` installed: `pip install httpx` |
+
+## Endpoint
+
+Computer-Get (checkout / checkin / status) and Computer-Do (MCP) calls go to the Agent 365 endpoint (production):
+
+```
+https://agent365.svc.cloud.microsoft/agents/tenants/{tenantId}/servers/mcp_W365ComputerUse
+```
+
+Replace `{tenantId}` with your tenant ID.
 
 ## Authentication
 
-Windows 365 for Agents uses **Bearer token (service-to-service)** authentication for standard partner scenarios. Acquire an app-only token from Microsoft Entra, targeting the ARI resource app for your environment:
-
-```
-POST https://login.microsoftonline.com/{tenantId}/oauth2/v2.0/token
-Content-Type: application/x-www-form-urlencoded
-
-client_id={your-app-client-id}
-&client_secret={your-app-secret}
-&scope={ari-resource-app-id}/.default
-&grant_type=client_credentials
-```
-
-**Audiences by environment:**
-
-| Environment | Audience |
-|-------------|----------|
-| Test / Int | `api://274133f7-12bb-4bfb-ae3b-bd446b7e8a75` |
-| PreProd / Prod | `api://90ecec28-f5a6-42b3-9bde-dae1ca98f8b5` |
-
-For the full set of authentication scenarios (app-only, on-behalf-of, and the agent-token flow used for screen sharing and shared control), see [Authentication](./authentication.md).
+Calls use a **Bearer token**. Acquire one for the server and send it as `Authorization: Bearer {token}`. See [Authentication](./authentication.md).
 
 ## End-to-End Python Example
 
@@ -41,34 +32,19 @@ import json
 import uuid
 
 # --- Configuration ---
-TENANT_ID     = "your-tenant-id"
-CLIENT_ID     = "your-app-client-id"
-CLIENT_SECRET = "your-app-secret"
-POOL_ID       = "your-pool-id"
-USER_OID      = "your-aad-user-object-id"
-REGION        = "canadacentral"  # Test regions: canadacentral, eastus2
-SESSION_BASE  = f"https://{REGION}.sessionmanagement.regional.cloudinferenceplatform.azure-test.net"
+TENANT_ID = "your-tenant-id"
+POOL_ID   = "your-pool-id"
+USER_OID  = "your-aad-user-object-id"
+TOKEN     = "your-bearer-token"  # see Authentication
 
-# --- 1. Acquire token ---
-token_resp = httpx.post(
-    f"https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/token",
-    data={
-        "client_id": CLIENT_ID,
-        "client_secret": CLIENT_SECRET,
-        # Test and Int share this audience (the ARI resource app for the environment)
-        "scope": "api://274133f7-12bb-4bfb-ae3b-bd446b7e8a75/.default",
-        "grant_type": "client_credentials",
-    },
-)
-TOKEN = token_resp.json()["access_token"]
+BASE = f"https://agent365.svc.cloud.microsoft/agents/tenants/{TENANT_ID}/servers/mcp_W365ComputerUse"
 
-# --- 2. Checkout session ---
-# RECOMMENDED: pass x-ms-sessionId for idempotency. It is optional, but without it a
-# network retry can allocate a second, orphaned device. Passing it also lets you
-# retrieve the same session later.
+# --- 1. Checkout session ---
+# Pass x-ms-sessionId for idempotency: without it, a network retry can allocate a
+# second, orphaned device. With it, retries return the same session.
 session_id = str(uuid.uuid4())
 checkout_resp = httpx.post(
-    f"{SESSION_BASE}/api/pools/{POOL_ID}/sessions",
+    f"{BASE}/api/pools/{POOL_ID}/sessions",
     params={"api-version": "2.0"},
     headers={
         "Authorization": f"Bearer {TOKEN}",
@@ -77,19 +53,18 @@ checkout_resp = httpx.post(
     },
     timeout=35.0,  # Checkout may take up to 30 seconds
 )
-session = checkout_resp.json()
-computer_url = session["computerUrl"]                    # no api-version on this URL
-computer_id  = computer_url.split("/computers/")[1]      # the bare computerId (GUID)
+session      = checkout_resp.json()
+computer_url = session["computerUrl"]
+computer_id  = computer_url.split("/computers/")[1].split("?")[0]
 
-# --- 3. Create MCP client ---
+# --- 2. Create MCP client (JSON-RPC over HTTP POST to the Agent 365 endpoint) ---
 class W365AMcpClient:
-    """MCP client that connects to a Windows 365 for Agents
-    remote MCP server via HTTP POST."""
+    """MCP client that connects to the Windows 365 for Agents server via HTTP POST."""
 
-    def __init__(self, computer_url: str, computer_id: str, token: str):
-        # Append /mcp to the computerUrl from checkout, and send x-ms-computerId
-        # on every device call (MCP, screen sharing, and status).
-        self.endpoint = f"{computer_url}/mcp"
+    def __init__(self, base: str, computer_id: str, token: str):
+        # Computer-Do (MCP) is issued to the Agent 365 endpoint; x-ms-computerId
+        # targets the Cloud PC assigned at checkout.
+        self.endpoint = f"{base}/mcp"
         self.headers = {
             "Authorization": f"Bearer {token}",
             "x-ms-computerId": computer_id,
@@ -127,43 +102,36 @@ class W365AMcpClient:
         return self._send("tools/list", {})
 
     def call_tool(self, name: str, arguments: dict = None):
-        return self._send("tools/call", {
-            "name": name,
-            "arguments": arguments or {},
-        })
+        return self._send("tools/call", {"name": name, "arguments": arguments or {}})
 
     def close(self):
         self.http.close()
 
-# --- 4. Use the MCP client ---
-mcp = W365AMcpClient(computer_url, computer_id, TOKEN)
+# --- 3. Use the MCP client ---
+mcp = W365AMcpClient(BASE, computer_id, TOKEN)
 
 # Initialize (required once per session)
 mcp.initialize(client_name="QuickStartAgent")
 
 # Take a screenshot
-screenshot = mcp.call_tool("take_screenshot")
-print(screenshot)
+print(mcp.call_tool("take_screenshot"))
 
-# Click at coordinates
+# Click and type
 mcp.call_tool("click", {"x": 500, "y": 300})
-
-# Type text
 mcp.call_tool("type_text", {"text": "Hello from my agent!"})
 
 # List available tools
-tools = mcp.list_tools()
-print(json.dumps(tools, indent=2))
+print(json.dumps(mcp.list_tools(), indent=2))
 
 mcp.close()
 
-# --- 5. Checkin (release session) ---
+# --- 4. Checkin (release session) ---
 httpx.delete(
-    f"{SESSION_BASE}/api/sessions/{session_id}",
+    f"{BASE}/api/sessions/{session_id}",
     params={"api-version": "2.0"},
     headers={
         "Authorization": f"Bearer {TOKEN}",
-        "x-ms-sessionId": session_id,  # Required on checkin; must match sessionId in path
+        "x-ms-sessionId": session_id,  # Required; must match sessionId in path
     },
 )
 ```
@@ -172,18 +140,15 @@ httpx.delete(
 
 ## What Just Happened?
 
-1. **Authenticated** with Microsoft Entra using client credentials
-2. **Checked out** a Cloud PC from your pool (reserved it for this session)
-3. **Initialized** an MCP session on the Cloud PC
-4. **Took a screenshot** of the desktop
-5. **Clicked** at screen coordinates (500, 300)
-6. **Typed text** into the focused element
-7. **Released** the Cloud PC back to the pool
+1. **Checked out** a Cloud PC from your pool through the Agent 365 endpoint
+2. **Initialized** an MCP session on the Cloud PC
+3. **Took a screenshot**, **clicked**, and **typed text**
+4. **Released** the Cloud PC back to the pool
 
 ## Next Steps
 
-- [Authentication](./authentication.md) — all token scenarios and required scopes
-- [Onboarding](./onboarding.md) — how to get a test pool
-- [Architecture Overview](./architecture.md) — understand the four-plane design
-- [MCP Tools Reference](./mcp-tools.md) — explore all 62 built-in tools
+- [Authentication](./authentication.md) — acquiring a Bearer token
+- [Onboarding](./onboarding.md) — getting access to the server
+- [Architecture Overview](./architecture.md) — the three-plane design
+- [MCP Tools Reference](./mcp-tools.md) — all 62 built-in tools
 - [API Reference](./api-reference.md) — full endpoint documentation
