@@ -1,9 +1,10 @@
 # API Reference
 
-Windows 365 for Agents exposes two groups of endpoints:
+Windows 365 for Agents is organized into three planes:
 
-- **Session endpoints** (`/api/...`): checkout (allocate a Cloud PC) and checkin (release it). These use the **Session Base URL**.
-- **Device endpoints** (`/computers/...`): Get Computer Status, MCP tool calls, and screen sharing on a specific device. These use the **Device Base URL** (a pool-scoped hostname) and require the `x-ms-computerId` header on every request.
+- **Computer-Get:** allocate a Cloud PC (checkout), release it (checkin), and check its status.
+- **Computer-Do:** drive the Cloud PC through the MCP interface (62 tools).
+- **Computer-See:** real-time screen sharing for a human observer.
 
 | Surface | Plane | Called By | Purpose |
 |---------|-------|-----------|---------|
@@ -12,32 +13,35 @@ Windows 365 for Agents exposes two groups of endpoints:
 | **MCP** | Computer-Do | AI agent | Operate the Cloud PC (62 tools) |
 | **Screen sharing** | Computer-See | Partner app (for a human) | Observe and co-drive |
 
-## Environment URLs
+## Endpoint
 
-| Environment | Regions | Session Base URL | Device Base URL |
-|-------------|---------|-----------------|-----------------|
-| Test | canadacentral, eastus2 | `https://{region}.sessionmanagement.regional.cloudinferenceplatform.azure-test.net` | `https://{poolId}.{region}.remotinginterface.regional.cloudinferenceplatform.azure-test.net` |
-| Int | westus2, northeurope | `https://{region}.sessionmanagement.regional.cloudinferenceplatform.azure-int.net` | `https://{poolId}.{region}.remotinginterface.regional.cloudinferenceplatform.azure-int.net` |
-| PreProd | Contact W365A team | `https://{region}.sessionmanagement.regional.cloudinferenceplatform.azure-preprod.net` | `https://{poolId}.{region}.remotinginterface.regional.cloudinferenceplatform.azure-preprod.net` |
-| Prod | Contact W365A team | `https://{region}.sessionmanagement.regional.cloudinferenceplatform.azure.net` | `https://{poolId}.{region}.remotinginterface.regional.cloudinferenceplatform.azure.net` |
+Computer-Get and Computer-Do calls are served from the Agent 365 endpoint (production):
+
+```
+https://agent365.svc.cloud.microsoft/agents/tenants/{tenantId}/servers/mcp_W365ComputerUse
+```
+
+Replace `{tenantId}` with your tenant ID. This is the production endpoint, and all Computer-Get and Computer-Do paths below are issued against it.
+
+Computer-See (screen sharing) does **not** use this endpoint. It uses the `screenshareUrl` returned in the checkout response, driven by the Screenshare SDK. See [Screen Sharing](./screen-sharing.md).
 
 ## API Summary
 
-| Method | Path | Purpose |
-|--------|------|---------|
-| `POST` | `/api/pools/{poolId}/sessions?api-version=2.0` | **Checkout:** allocate a Cloud PC |
-| `DELETE` | `/api/sessions/{sessionId}?api-version=2.0` | **Checkin:** release the Cloud PC |
-| `GET` | `{computerUrl}/status?api-version=1.0` | **Status:** device readiness (Waiting / Live / Ready) |
-| `POST` | `{computerUrl}/mcp?api-version=1.0` | **MCP:** send JSON-RPC messages |
-| _(SDK)_ | Screenshare SDK (`screenshare-embed.js`) | **Screen sharing** (see [Screen Sharing](./screen-sharing.md)) |
+| Method | Path | Plane | Purpose |
+|--------|------|-------|---------|
+| `POST` | `/api/pools/{poolId}/sessions?api-version=2.0` | Get | **Checkout:** allocate a Cloud PC |
+| `DELETE` | `/api/sessions/{sessionId}?api-version=2.0` | Get | **Checkin:** release the Cloud PC |
+| `GET` | `/status?api-version=1.0` | Get | **Status:** device readiness (Waiting / Live / Ready) |
+| `POST` | `/mcp?api-version=1.0` | Do | **MCP:** send JSON-RPC messages |
+| _(SDK)_ | Screenshare SDK (`screenshare-embed.js`) | See | **Screen sharing** (uses `screenshareUrl`) |
 
-> Session endpoints (`/api/...`) use the **Session Base URL**. Device endpoints (`{computerUrl}/...`) use the **Device Base URL** returned as `computerUrl` at checkout.
+> Computer-Get and Computer-Do paths are relative to the Agent 365 endpoint above; pass the `x-ms-computerId` from checkout to target the assigned Cloud PC. Computer-See uses the `screenshareUrl` returned at checkout.
 
 ---
 
 ## Session Checkout
 
-Allocates a Cloud PC and returns connection URLs. May take up to **30 seconds** while a device is being assigned.
+Allocates a Cloud PC and returns connection details. May take up to **30 seconds** while a device is being assigned.
 
 ```
 POST /api/pools/{poolId}/sessions?api-version=2.0
@@ -59,25 +63,23 @@ POST /api/pools/{poolId}/sessions?api-version=2.0
   "sessionId": "a1b2c3d4-...",
   "status": "Succeeded",
   "connectivityUrl": null,
-  "computerUrl": "https://{poolId}.{region}.remotinginterface.../computers/{computerId}",
-  "screenshareUrl": "https://{poolId}.{region}.remotinginterface.../computers/{computerId}/screenshare"
+  "computerUrl": "https://.../computers/{computerId}",
+  "screenshareUrl": "https://.../computers/{computerId}/screenshare"
 }
 ```
 
-> **Note:** `connectivityUrl` may be null. Use `computerUrl` for MCP and screen sharing, and use `screenshareUrl` for the direct screenshare surface. The `computerUrl` does **not** carry an `api-version`; you append it per device call.
+### Using the Checkout Response
 
-### Using `computerUrl`
-
-- **Append `/mcp`** to `computerUrl` for MCP tool calls: `{computerUrl}/mcp?api-version=1.0`.
-- **Always pass `x-ms-computerId`** when calling `computerUrl` for MCP tools, screen sharing, or status tracking.
-- **Optionally pass `x-ms-sessionId`** to retrieve the details of an already checked-out session.
+- Take the `{computerId}` from the response and pass it as the **`x-ms-computerId`** header on your Computer-Do (MCP) and Get Computer Status calls to the Agent 365 endpoint.
+- Pass `screenshareUrl` to the [Screenshare SDK](./screen-sharing.md) for Computer-See.
+- `connectivityUrl` may be null; it is not required.
 
 ### Error Responses
 
 | Code | Meaning | Action |
 |------|---------|--------|
 | 401 | Unauthorized | Token missing, expired, or wrong audience. Re-authenticate. |
-| 403 | Forbidden | App not registered as a trusted caller. Contact the W365A team. |
+| 403 | Forbidden | Your app is not authorized to call the server for this tenant. See [Authentication](./authentication.md). |
 | 409 | Conflict | Session already exists in a conflicting state. Checkin first, then retry. |
 | 500 | Internal Server Error | Transient. Retry with the same `x-ms-sessionId`. |
 | 504 | Gateway Timeout | Device provisioning took too long. Retry with the same `x-ms-sessionId`. |
@@ -91,7 +93,7 @@ POST /api/pools/{poolId}/sessions?api-version=2.0
 Returns the current status of a single assigned Cloud PC. Use it to confirm the device is ready before issuing commands.
 
 ```
-GET {computerUrl}/status?api-version=1.0
+GET /status?api-version=1.0
 ```
 
 ### Request Headers
@@ -99,14 +101,14 @@ GET {computerUrl}/status?api-version=1.0
 | Header | Required | Description |
 |--------|----------|-------------|
 | `Authorization` | Yes | `Bearer {token}` |
-| `x-ms-computerId` | Yes | Must match the `computerId` in `computerUrl` |
+| `x-ms-computerId` | Yes | The `computerId` from the checkout response |
 
 ### Response (200 OK)
 
 ```json
 {
-  "computerUrl": "https://{poolId}.{region}.remotinginterface.../computers/{computerId}",
-  "screenshareUrl": "https://{poolId}.{region}.remotinginterface.../computers/{computerId}/screenshare",
+  "computerUrl": "https://.../computers/{computerId}",
+  "screenshareUrl": "https://.../computers/{computerId}/screenshare",
   "status": "Ready"
 }
 ```
@@ -119,8 +121,8 @@ GET {computerUrl}/status?api-version=1.0
 |------|---------|--------|
 | 400 | Bad Request | `computerId` is empty, whitespace, or not a valid GUID. Verify it is a well-formed UUID v4. |
 | 401 | Unauthorized | Token missing, expired, or wrong audience. Re-authenticate. |
-| 403 | Forbidden | App not registered as a trusted caller. Contact the W365A team. |
-| 404 | Not Found | The pool could not be resolved from the request hostname. Ensure you send to the correct pool-scoped hostname. |
+| 403 | Forbidden | Your app is not authorized to call the server for this tenant. See [Authentication](./authentication.md). |
+| 404 | Not Found | The session or computer could not be resolved. Verify the `x-ms-computerId`. |
 | 503 | Service Unavailable | Temporarily unable to validate the request. Retry with exponential backoff. |
 
 ---
@@ -132,7 +134,7 @@ Session kind is determined by request headers at checkout time.
 | Kind | Headers Required | Description |
 |------|-----------------|-------------|
 | **HumanUser** (default) | `user-object-id: {AAD user OID}` | Standard interactive user session bound to an AAD identity |
-| **Agentic** | `x-ms-authorization-auxiliary: {agent identity token}`, `user-object-id: {agent user ID}` | Agent-driven session. The auxiliary token is an agent identity token issued by the Identity RM service provisioned in your tenant. It identifies the specific agent (for example, "Sales Agent") requesting access. Contact the W365A team for tenant setup and token provisioning. |
+| **Agentic** | `x-ms-authorization-auxiliary: {agent identity token}`, `user-object-id: {agent user ID}` | Agent-driven session. The auxiliary token is an agent identity token that identifies the specific agent (for example, "Sales Agent") requesting access. See [Authentication](./authentication.md) for agent identity setup. |
 
 > Idle sessions are evicted after **30 minutes of inactivity**. Any MCP or screenshare request counts as activity. Always checkin sessions explicitly when done.
 
@@ -168,10 +170,10 @@ DELETE /api/sessions/{sessionId}?api-version=2.0
 
 ## MCP (Model Context Protocol)
 
-Send MCP messages as JSON-RPC payloads via HTTP POST. Each POST sends one message and returns one response. The device endpoint acts as a remote MCP server.
+Send MCP messages as JSON-RPC payloads via HTTP POST to the Agent 365 endpoint. Each POST sends one message and returns one response.
 
 ```
-POST {computerUrl}/mcp?api-version=1.0
+POST /mcp?api-version=1.0
 ```
 
 ### Request Headers
@@ -179,7 +181,7 @@ POST {computerUrl}/mcp?api-version=1.0
 | Header | Required | Description |
 |--------|----------|-------------|
 | `Authorization` | Yes | `Bearer {token}` |
-| `x-ms-computerId` | Yes | Must match the `computerId` in `computerUrl`. Mismatches cause 400/403. |
+| `x-ms-computerId` | Yes | The `computerId` from the checkout response |
 | `Content-Type` | Yes | `application/json` |
 
 ### MCP Session Lifecycle
@@ -221,9 +223,9 @@ You only need to initialize once per session. Subsequent `initialize` calls retu
 | 200 | -32601 | Method not found | Check method name |
 | 200 | -32602 | Invalid params, wrong arguments | Check tool parameter schema |
 | 200 | -32603 | Internal error, device-side failure | Retry after 2 to 5 seconds |
-| 400 | (none) | Bad request | `x-ms-computerId` mismatch or missing |
+| 400 | (none) | Bad request | `x-ms-computerId` missing |
 | 401 | (none) | Unauthorized | Re-authenticate |
-| 403 | (none) | Forbidden | App not in the pool's `trustedApps` list |
+| 403 | (none) | Forbidden | App not authorized for this tenant |
 | 503 | (none) | Device not ready | Retry after 2 to 5 seconds (up to 30s total) |
 
 ### Limits
@@ -236,24 +238,19 @@ You only need to initialize once per session. Subsequent `initialize` calls retu
 
 ## Screen Sharing
 
-Real-time screen sharing over WebRTC is delivered through the browser-side **Screenshare SDK**, not by direct REST calls. Check out a session, then pass `computerUrl` and `computerId` to the SDK. The SDK handles all video streaming, input relay, and the underlying screenshare calls for you.
+Real-time screen sharing over WebRTC is delivered through the browser-side **Screenshare SDK**. It uses the `screenshareUrl` returned in the checkout response, not the Agent 365 endpoint. Check out a session, then pass `computerUrl` and `computerId` to the SDK; it handles the video streaming, input relay, and screenshare calls for you.
 
 See the full guide: [Screen Sharing](./screen-sharing.md).
 
 ---
 
-## Authorization for Device Endpoints
+## Authorization
 
-Device endpoints (`{computerUrl}/...`) use pool-based authorization:
-
-1. The pool ID is extracted from the request hostname (`{poolId}.{region}.remotinginterface...`).
-2. Your app identity (the `azp`/`appid` claim) is validated against that pool's `trustedApps` list.
-
-A `403` on a device endpoint means your app is not in the pool's `trustedApps`. The same bearer token works for session and device endpoints; your app just has to be registered for the pool. See [Authentication](./authentication.md) for details.
+Your app must be authorized to call the server for your tenant. A `403` on any call means it is not. See [Authentication](./authentication.md).
 
 ## Next Steps
 
-- [Authentication](./authentication.md) — token scenarios and required scopes
+- [Authentication](./authentication.md) — how your app authenticates to the endpoint
 - [MCP Tools Reference](./mcp-tools.md) — all 62 built-in tools
 - [Screen Sharing](./screen-sharing.md) — human-in-the-loop controls
-- [Quick Start](./quickstart.md) — end-to-end Python example
+- [Quick Start](./quickstart.md) — end-to-end example
