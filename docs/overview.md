@@ -34,7 +34,8 @@ Windows 365 for Agents enables agent makers to:
 
 ## Regions Available
 
-Windows 365 for Agents is available globally in all [supported Azure regions for Cloud PC provisioning](https://learn.microsoft.com/en-us/windows-365/enterprise/requirements?tabs=enterprise%2Cent#supported-azure-regions-for-cloud-pc-provisioning)
+Windows 365 for Agents is **globally available** in all supported regions where
+Cloud PC provisioning is supported.
 
 ## Device Management
 
