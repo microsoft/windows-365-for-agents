@@ -1,6 +1,6 @@
 # MCP Tool Reference
 
-Windows 365 for Agents ships **62 built-in tools**, invoked via `tools/call` over the [MCP endpoint](./api-reference.md#mcp-model-context-protocol). Coordinates use screen pixels with `(0, 0)` at top-left. Discover tools at runtime via `tools/list`.
+Windows 365 for Agents ships **62 built-in Computer-Use tools**, invoked via `tools/call` through the [A365 tooling gateway (ATG)](./api-reference.md#how-you-talk-to-the-atg). Coordinates use screen pixels with `(0, 0)` at top-left. Discover the live tool set at runtime via `tools/list`.
 
 ---
 
@@ -589,5 +589,5 @@ Focus a browser window (Edge, Chrome, Firefox). Optionally filter by URL or titl
 ## Next Steps
 
 - [API Reference](./api-reference.md): endpoint details
-- [Quick Start](./quickstart.md): copy-paste Python example
+- [Getting Started](./getting-started.md): onboarding flow and first call
 - [Screen Sharing](./screen-sharing.md): human observation
