@@ -41,6 +41,30 @@ The one idea to hold onto: **three planes, three surfaces.**
 
 ## Prerequisites
 
+### Licenses
+
+You need an **Agent 365** license in your tenant, plus the standard Windows 365
+prerequisite licenses. These are every license on the
+[Windows 365 requirements](https://learn.microsoft.com/en-us/windows-365/enterprise/requirements?tabs=enterprise%2Cent)
+list **except** the per-user Windows 365 Cloud PC seat, which agent pools don't use:
+
+| License | Why it's needed |
+|---------|-----------------|
+| **Agent 365** | Windows 365 for Agents is consumed through Agent 365. |
+| **Windows Enterprise E3** (or higher) | Underlying Windows entitlement, per the Windows 365 requirements. |
+| **Microsoft Intune** | Create and manage the provisioning policy (Agents) and pools. |
+| **Microsoft Entra ID P1** | Identity and Conditional Access baseline. |
+
+> Unlike Windows 365 Enterprise, Windows 365 for Agents does **not** require a
+> per-user Windows 365 (Cloud PC) seat license. Cloud PC capacity is
+> consumption-based through a billing plan (see [Also needed](#also-needed) below).
+
+### Also needed
+
+- A [Pay-as-you-Go Billing Policy](https://learn.microsoft.com/en-us/windows-365/agents/billing-w365a) and access to the
+  [Microsoft Intune admin center](https://intune.microsoft.com) for pool
+  management. See [Cloud PC Pools & Provisioning](./cloud-pc-pools.md).
+
 ### Stage 0 (gate): Microsoft Agent 365
 
 Do this **before** anything Windows 365 specific. Without an A365 agent identity
@@ -51,12 +75,6 @@ and the tooling gateway, there is nothing to authorize your Computer-Use calls.
 | The **Agent 365 CLI** installed | [Agent 365 SDK overview](https://learn.microsoft.com/en-us/microsoft-agent-365/developer/agent-365-sdk?tabs=python) |
 | A tenant role: **Global Administrator** or **Agent ID Developer**, plus Azure subscription access | [Setup agent blueprint › Prerequisites](https://learn.microsoft.com/en-us/microsoft-agent-365/developer/registration) |
 | Understanding of **agent blueprint**, **agent identity**, and **agent user** | [Agent identity](https://learn.microsoft.com/en-us/entra/agent-id/agent-users) · [Agent OAuth protocols](https://learn.microsoft.com/en-us/entra/agent-id/agent-oauth-protocols) |
-
-### Also needed (Windows 365 side)
-
-- A **Windows 365 for Agents billing plan** and access to the
-  [Microsoft Intune admin center](https://intune.microsoft.com) for pool
-  management. See [Cloud PC Pools & Provisioning](./cloud-pc-pools.md).
 
 ---
 
