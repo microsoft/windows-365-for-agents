@@ -23,7 +23,7 @@ than repeating them. Only the Windows 365 specific parts are detailed here.
 
 Before setup, get oriented:
 
-- **What / why / when** — start with Microsoft Learn as the conceptual front
+- **What / why / when** — start with [Microsoft Learn](https://learn.microsoft.com/en-us/windows-365/agents/introduction-windows-365-for-agents) as the conceptual front
   door, then this repo for the hands-on flow.
 - **This repo:** [Overview](./overview.md) (what it is),
   [Architecture](./architecture.md) (the three planes and where each is reached),
