@@ -141,9 +141,3 @@ See [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) for details.
 ## License
 
 Documentation (this repo's docs, README, images, and other non-code assets) is licensed under [CC-BY-4.0](./LICENSE.md). The code in [`W365A-Playground-Agent/`](./W365A-Playground-Agent/) is licensed under the [MIT License](./W365A-Playground-Agent/LICENSE).
-
-See [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) for details.
-
-## License
-
-Documentation (this repo's docs, README, images, and other non-code assets) is licensed under [CC-BY-4.0](./LICENSE.md). The code in [`W365A-Playground-Agent/`](./W365A-Playground-Agent/) is licensed under the [MIT License](./W365A-Playground-Agent/LICENSE).
