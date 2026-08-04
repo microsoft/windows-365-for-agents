@@ -116,14 +116,14 @@ Until consent completes, Computer-Use calls return **403**. Details in
 
 ### 4. Provision a Cloud PC agent pool (Windows 365)
 
-Pool management is Windows 365 territory and uses **Microsoft Graph** and the
-Intune admin center — not the ATG. Create a provisioning policy (Agents) to stand
-up a pool your agent can draw from. See
-[Cloud PC Pools & Provisioning](./cloud-pc-pools.md).
+Pool management is Windows 365 territory and is fully self-service — not the ATG.
+Stand up a pool your agent can draw from using either path:
 
-> **Public preview:** partner pools may be provisioned for you by the Windows 365
-> for Agents team as part of onboarding. See
-> [Cloud PC Pools & Provisioning](./cloud-pc-pools.md#create-a-pool-provisioning-policy).
+- **Microsoft Intune admin center** — create a provisioning policy (Agents). Recommended starting point.
+- **Microsoft Graph (Cloud PC APIs)** — programmatic pool management.
+
+Both paths manage the same pools. See
+[Cloud PC Pools & Provisioning](./cloud-pc-pools.md#create-a-pool-provisioning-policy).
 
 ---
 
