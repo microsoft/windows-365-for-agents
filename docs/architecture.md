@@ -28,13 +28,15 @@ Responsible for creating and maintaining the [Cloud PC agent pool](./cloud-pc-po
 
 ### 2. Computer-Get: Assignment
 
-Brokers available Cloud PCs from the pool to the caller that needs one.
+Brokers available Cloud PCs from the pool to the caller that needs one. Computer-Get
+is reached through the **A365 tooling gateway (ATG)**, the same surface as
+Computer-Do (see [API Reference](./api-reference.md)).
 
 **Key elements:**
 
 | Component | Purpose |
 |-----------|---------|
-| **Session API** | Exposes Cloud PC acquisition through checkout and checkin (`/api/pools/{poolId}/sessions`) |
+| **Session management** | Acquire (checkout) and release (checkin) a Cloud PC, through the ATG |
 | **Check-in / Check-out** | Reserves a Cloud PC for a session and returns it to the pool when done |
 | **Get Computer Status** | Reports whether an assigned Cloud PC is Waiting, Live, or Ready |
 | **Assignment Engine** | Matches requests to the optimal Cloud PC based on capability, region, and availability |
@@ -64,13 +66,15 @@ Delivers the interactive pixel and device experience to humans.
 
 ## Device Capabilities
 
-Once a Cloud PC is assigned, the device exposes multiple capabilities through the same pool-scoped host. Each is authorized by your bearer token and the `x-ms-computerId` header:
+Once a Cloud PC is acquired, it exposes multiple capabilities. Each is reached
+through its own surface and authorized by the agent-user bearer token (see
+[Authentication](./authentication.md)):
 
-| Capability | Plane | Purpose | Reference |
-|------------|-------|---------|-----------|
-| **MCP** | Computer-Do | 62 built-in desktop and browser tools | [MCP Tools](./mcp-tools.md) |
-| **Screen sharing** | Computer-See | Real-time observation and shared control | [Screen Sharing](./screen-sharing.md) |
-| **Get Computer Status** | Computer-Get | Readiness of the assigned Cloud PC | [API Reference](./api-reference.md#get-computer-status) |
+| Capability | Plane | Reached via | Purpose | Reference |
+|------------|-------|-------------|---------|-----------|
+| **MCP tools** | Computer-Do | A365 tooling gateway (ATG) | 62 built-in desktop and browser tools | [MCP Tools](./mcp-tools.md) |
+| **Get Computer Status** | Computer-Get | A365 tooling gateway (ATG) | Readiness of the assigned Cloud PC | [API Reference](./api-reference.md#get-computer-status) |
+| **Screen sharing** | Computer-See | Screen-share SDK (session link) | Real-time observation and shared control | [Screen Sharing](./screen-sharing.md) |
 
 ## Entry Points
 
@@ -119,6 +123,7 @@ Once a Cloud PC is assigned, the device exposes multiple capabilities through th
 
 ## Next Steps
 
+- [Getting Started](./getting-started.md)
 - [Agent Session Lifecycle](./sessions.md)
 - [Authentication](./authentication.md)
 - [API Reference](./api-reference.md)
