@@ -6,8 +6,17 @@ create a pool of Cloud PCs that agents draw from only when they need one.
 
 This page covers both the **concept** (what a pool is and its lifecycle states)
 and the **procedures** to create, update, delete, and monitor pools. Pool
-management is the **Computer-Create** plane — it uses **Microsoft Graph** and the
-**Microsoft Intune admin center**, not the A365 tooling gateway.
+management is the **Computer-Create** plane. It is fully self-service through two
+interchangeable paths, neither of which touches the A365 tooling gateway:
+
+- **Microsoft Intune admin center** — create a provisioning policy (Agents). This
+  is the recommended starting point.
+- **Microsoft Graph (Cloud PC APIs)** — programmatic pool management for
+  automation and CI/CD.
+
+> For the authoritative conceptual reference, see
+> [Cloud PC agent pools](https://learn.microsoft.com/en-us/windows-365/agents/cloud-pc-agent-pools)
+> on Microsoft Learn.
 
 ## What Is a Cloud PC Agent Pool?
 
@@ -33,12 +42,15 @@ single resource rather than managing individual Cloud PCs.
 ## Create a Pool (Provisioning Policy)
 
 In Microsoft Intune, a **provisioning policy (Agents)** represents a Cloud PC agent
-pool. Creating the policy provisions the pool.
+pool. Creating the policy provisions the pool. You can create a pool in either of
+the following ways:
 
-You can create a pool in either of the following ways:
+1. **Microsoft Intune admin center** — the step-by-step flow below (recommended).
+2. **Microsoft Graph (Cloud PC APIs)** — programmatic creation; see
+   [Using the Microsoft Graph API](#using-the-microsoft-graph-api) below.
 
-1. **Microsoft Intune admin center** — the step-by-step flow below.
-2. **Microsoft Graph** — programmatic pool creation.
+> The Intune step-by-step below mirrors the authoritative Learn procedure,
+> [Create a provisioning policy (agents)](https://learn.microsoft.com/en-us/windows-365/agents/create-provisioning-policy-agents).
 
 ### Prerequisites
 
@@ -86,18 +98,39 @@ After provisioning, Cloud PCs for Agents appear in **Microsoft Intune admin
 center** > **Devices** > **All Devices**. The device enrollment profile name
 matches the provisioning policy name.
 
+### Using the Microsoft Graph API
+
+If you prefer to manage pools programmatically — for automation, infrastructure
+as code, or CI/CD — use the **Cloud PC Graph APIs** instead of the Intune portal.
+The same provisioning-policy resource that the portal creates is available through
+Graph, so you can create, update, list, and delete agent pools from code.
+
+All pool management endpoints are Microsoft Graph endpoints. For the resource
+types, methods, and request/response schemas, see the authoritative reference:
+
+- [Working with Windows 365 Cloud PCs using the Microsoft Graph API](https://learn.microsoft.com/en-us/graph/api/resources/cloudpc-api-overview?view=graph-rest-beta&preserve-view=true)
+
+> The Graph path and the Intune path manage the **same** pools — pick whichever
+> fits your workflow, or mix them (for example, create in the portal and automate
+> updates through Graph).
+
 ## Pool Status
 
 Pool status reflects the overall health and availability of the pool. Status is
 evaluated at the pool level, not for individual Cloud PCs.
 
-| Pool Status | Can agents check out Cloud PCs? | Admin action needed? |
-|-------------|--------------------------------|----------------------|
-| **Active, Created** | Yes | None |
-| **Provisioning** | Maybe | Wait |
-| **Provisioning paused** | Yes | Recommended |
-| **Failed** | No | Required |
-| **Deleting** | No | None |
+| Pool Status | What it means |
+|-------------|---------------|
+| **Creating** | The pool is created and its Cloud PCs are provisioning. |
+| **Available** | The pool is created and healthy. It may already have provisioned Cloud PCs. |
+| **Updating** | A reprovision or pool update is in progress. |
+| **Available with warning** | The pool is created but has failed updates. Available devices may still exist. |
+| **Failed** | There are no available devices. Cloud PCs can't be provisioned, and admin action is required to fix the pool. |
+| **Deleting** | The pool is being deleted. |
+
+> To see whether a pool has provisioned Cloud PCs available, check the
+> **Available sessions** count on the provisioning policy (see
+> [Monitor available sessions](#monitor-available-sessions)).
 
 ## Update a Pool (Edit the Provisioning Policy)
 
