@@ -141,6 +141,10 @@ document. It assumes you already acquired a Cloud PC (see
 </html>
 ```
 
+For a complete, working integration, see the screen-share implementation in the
+[Windows 365 for Agents Playground](../W365A-Playground-Agent/) sample.
+
+
 ## How It Works
 
 The SDK is a thin wrapper around an iframe. Your page creates a
