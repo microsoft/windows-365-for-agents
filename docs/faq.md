@@ -6,9 +6,10 @@ questions, start with [Getting Started](./getting-started.md).
 ## Setup & Identity
 
 **Q: What do I need before I can call Computer-Use?**
-A: An A365 agent blueprint published in Entra (Stage 0), the Windows 365
-Computer-Use MCP server added to that blueprint with admin consent, and a
-provisioned Cloud PC agent pool. See [Getting Started](./getting-started.md).
+A: An A365 agent blueprint published in Entra, the Windows 365 Computer-Use MCP
+server added to that blueprint with admin consent, an agent user, and a
+provisioned Cloud PC agent pool with that agent assigned to it. See
+[Getting Started](./getting-started.md).
 
 **Q: My calls return 403 Forbidden.**
 A: The agent authenticated but isn't authorized to call Computer-Use for this
