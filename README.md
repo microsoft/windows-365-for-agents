@@ -10,7 +10,7 @@
 </div>
 
 
-[![Status](https://img.shields.io/badge/status-public%20preview-blue)](https://learn.microsoft.com/en-us/windows-365/public-preview)
+[![Status](https://img.shields.io/badge/status-generally%20available-brightgreen)](https://learn.microsoft.com/en-us/windows-365/agents/cloud-pc-agent-pools)
 [![Docs: CC-BY-4.0](https://img.shields.io/badge/docs-CC--BY--4.0-blue.svg)](./LICENSE.md) [![Code: MIT](https://img.shields.io/badge/code-MIT-blue.svg)](./W365A-Playground-Agent/LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![MCP](https://img.shields.io/badge/protocol-MCP-purple)](https://modelcontextprotocol.io)
@@ -31,7 +31,7 @@ Built on the [Windows 365](https://learn.microsoft.com/en-us/windows-365/overvie
 
 - 🖥️ **Secure Cloud PCs** — Entra ID-joined, Intune-managed, governed by enterprise security policies
 - 🔄 **Check-in / Check-out model** — Agents reserve a Cloud PC per task and return it when done
-- 🤖 **62 MCP tools** — 26 desktop tools (mouse/keyboard, windows, processes, shell, Python) and 36 browser tools (navigation, DOM interaction, accessibility refs, batch actions)
+- 🤖 **65 MCP tools** — 3 session-management tools plus 26 desktop tools (mouse/keyboard, windows, processes, shell, Python) and 36 browser tools (navigation, DOM interaction, accessibility refs, batch actions)
 - 👁️ **Real-time screen sharing** — Human-in-the-loop observation and takeover via WebRTC, embedded with the integrated screen-share SDK
 - 🏢 **Enterprise-grade** — Conditional Access, compliance, audit trails built in
 - ⚡ **Pool-based scaling** — Provision pools of Cloud PCs; agents request capability, not specific machines
@@ -41,13 +41,13 @@ Built on the [Windows 365](https://learn.microsoft.com/en-us/windows-365/overvie
 | Topic | Description |
 |-------|-------------|
 | [Overview](./docs/overview.md) | What is Windows 365 for Agents, platform capabilities, supported regions |
-| [Getting Started](./docs/getting-started.md) | The onboarding flow: Understand → Prerequisites (incl. A365) → Set up → Build → Validate → Manage → Troubleshoot, ending with your first Computer-Use call |
+| [Getting Started](./docs/getting-started.md) | The onboarding flow: Understand → Prerequisites → Set up → Build → Validate → Manage → Troubleshoot, ending with your first Computer-Use call |
 | [Architecture](./docs/architecture.md) | Four-plane architecture: Create, Get, Do, See |
 | [Session Lifecycle](./docs/sessions.md) | Prepare → Acquire → Connect → Act → Release |
 | [Cloud PC Pools & Provisioning](./docs/cloud-pc-pools.md) | Pool concepts, status, and creating/managing pools in Intune (backed by Microsoft Graph) |
 | [Authentication](./docs/authentication.md) | The agent-user token your agent sends, and the A365 identity model |
 | [API Reference](./docs/api-reference.md) | The A365 tooling gateway (ATG) surface: acquire/release a Cloud PC, status, and tool calls |
-| [MCP Tools](./docs/mcp-tools.md) | All 62 built-in Computer-Use tools: desktop, browser, accessibility |
+| [MCP Tools](./docs/mcp-tools.md) | All 65 tools: session management, desktop, browser, accessibility |
 | [Screen Sharing](./docs/screen-sharing.md) | The integrated screen-share SDK for human-in-the-loop observation and shared control |
 | [Security](./docs/security.md) | Identity, Entra integration, Zero Trust, governance |
 | [FAQ](./docs/faq.md) | Common questions and troubleshooting |
@@ -75,7 +75,7 @@ Built on the [Windows 365](https://learn.microsoft.com/en-us/windows-365/overvie
 │  │  ┌────────────┐ ┌─────────┐  │                           │
 │  │  │Computer-Do │ │Computer-│  │                           │
 │  │  │ (MCP Tools)│ │  See    │  │                           │
-│  │  │ 62 tools   │ │(Screen  │  │                           │
+│  │  │ 65 tools   │ │(Screen  │  │                           │
 │  │  │ Desktop,   │ │ Share)  │  │                           │
 │  │  │ Browser,   │ │ WebRTC  │  │                           │
 │  │  │ A11y       │ │         │  │                           │
@@ -86,35 +86,13 @@ Built on the [Windows 365](https://learn.microsoft.com/en-us/windows-365/overvie
 
 ## Quick Start
 
-> **Prerequisites:** an Agent 365 (A365) agent blueprint published in Entra with the Windows 365 Computer-Use MCP server added and consented, plus a provisioned Cloud PC agent pool. The [Getting Started](./docs/getting-started.md) guide walks the full setup, with A365 as an explicit Stage 0 gate.
+> **Prerequisites:** an Agent 365 (A365) agent blueprint published in Entra with the Windows 365 Computer-Use MCP server added and consented, plus a provisioned Cloud PC agent pool. The [Getting Started](./docs/getting-started.md) guide walks the full setup step by step.
 
 Windows 365 for Agents builds on **A365 identity and tooling**. Your agent authenticates as an A365 agent user and reaches the Computer-Use tools through the A365 tooling gateway (ATG). The simplest path is to register the Computer-Use MCP server with the [Agent 365 SDK](https://learn.microsoft.com/en-us/microsoft-agent-365/developer/agent-365-sdk?tabs=python): it performs the token exchange and the MCP handshake for you, then exposes the tools to your orchestrator.
 
-Once the tools are registered, the Windows 365 specific runtime loop is **acquire a Cloud PC, wait for `Ready`, call tools, release**:
+Once the tools are registered, the Windows 365 specific runtime loop is **acquire a Cloud PC, wait for `Ready`, call tools, release**. Tools such as `take_screenshot`, `click`, and `type_text` are built in; see [MCP Tools](./docs/mcp-tools.md) for the full catalog.
 
-```python
-# The `tools` handle is the Computer-Use server the Agent 365 SDK registered.
-# See ./docs/getting-started.md for setup and ./docs/mcp-tools.md for the catalog.
-
-# 1. Acquire a Cloud PC from your pool (returns a session context with a
-#    session link used for screen sharing). Supply an idempotency key so a
-#    retry returns the same device instead of allocating a second one.
-session = w365a.acquire_cloud_pc(pool_id=POOL_ID, idempotency_key=key)
-
-# 2. Wait until the device reports Ready before issuing tool calls.
-w365a.wait_until_ready(session)
-
-# 3. Drive the Cloud PC through the registered Computer-Use tools.
-print(tools.call("take_screenshot"))
-tools.call("click", {"x": 500, "y": 300})
-tools.call("type_text", {"text": "Hello from my agent!"})
-
-# 4. (Optional) Hand session.session_link to the screen-share SDK so a human
-#    can watch or take control. See ./docs/screen-sharing.md
-
-# 5. Always release the Cloud PC when done.
-w365a.release_cloud_pc(session)
-```
+For a complete, runnable implementation, see the [Windows 365 for Agents Playground](./W365A-Playground-Agent/) sample and its [step-by-step tutorial](./W365A-Playground-Agent/step-by-step-tutorial.md).
 
 Prefer plain MCP over HTTP instead of the full SDK? The ATG exposes a standard MCP surface, so a thin client plus the agent-user bearer works too. See [Getting Started](./docs/getting-started.md) and the [API Reference](./docs/api-reference.md).
 
