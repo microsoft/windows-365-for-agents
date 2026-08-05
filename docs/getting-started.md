@@ -10,12 +10,13 @@ piece.
 
 It is organized as an onboarding **flow**, not a reference list:
 
-> **Understand → Prerequisites (incl. A365) → Set up → Build → Validate → Manage → Troubleshoot**
+> **Understand → Prerequisites → Set up → Build → Validate → Manage → Troubleshoot**
 
-A365 is an explicit **Stage 0 gate**: Windows 365 for Agents builds on A365
-identity and tooling, so you complete the A365 steps *first*. Those steps are
-owned and documented by A365 — this guide **sequences them and links out** rather
-than repeating them. Only the Windows 365 specific parts are detailed here.
+Windows 365 for Agents builds on **A365 identity and tooling**, so several of the
+setup steps below are A365 steps. Those steps are owned and documented by A365 —
+this guide **sequences them and links out** rather than repeating them. Only the
+Windows 365 specific parts are detailed here. Work through the numbered steps in
+order; each one depends on the previous.
 
 ---
 
@@ -23,7 +24,7 @@ than repeating them. Only the Windows 365 specific parts are detailed here.
 
 Before setup, get oriented:
 
-- **What / why / when** — start with [Microsoft Learn](https://learn.microsoft.com/en-us/windows-365/agents/introduction-windows-365-for-agents) as the conceptual front
+- **What / why / when** — start with Microsoft Learn as the conceptual front
   door, then this repo for the hands-on flow.
 - **This repo:** [Overview](./overview.md) (what it is),
   [Architecture](./architecture.md) (the three planes and where each is reached),
@@ -41,34 +42,10 @@ The one idea to hold onto: **three planes, three surfaces.**
 
 ## Prerequisites
 
-### Licenses
+### Microsoft Agent 365
 
-You need an **Agent 365** license in your tenant, plus the standard Windows 365
-prerequisite licenses. These are every license on the
-[Windows 365 requirements](https://learn.microsoft.com/en-us/windows-365/enterprise/requirements?tabs=enterprise%2Cent)
-list **except** the per-user Windows 365 Cloud PC seat, which agent pools don't use:
-
-| License | Why it's needed |
-|---------|-----------------|
-| **Agent 365** | Windows 365 for Agents is consumed through Agent 365. |
-| **Windows Enterprise E3** (or higher) | Underlying Windows entitlement, per the Windows 365 requirements. |
-| **Microsoft Intune** | Create and manage the provisioning policy (Agents) and pools. |
-| **Microsoft Entra ID P1** | Identity and Conditional Access baseline. |
-
-> Unlike Windows 365 Enterprise, Windows 365 for Agents does **not** require a
-> per-user Windows 365 (Cloud PC) seat license. Cloud PC capacity is
-> consumption-based through a billing plan (see [Also needed](#also-needed) below).
-
-### Also needed
-
-- A [Pay-as-you-Go Billing Policy](https://learn.microsoft.com/en-us/windows-365/agents/billing-w365a) and access to the
-  [Microsoft Intune admin center](https://intune.microsoft.com) for pool
-  management. See [Cloud PC Pools & Provisioning](./cloud-pc-pools.md).
-
-### Stage 0 (gate): Microsoft Agent 365
-
-Do this **before** anything Windows 365 specific. Without an A365 agent identity
-and the tooling gateway, there is nothing to authorize your Computer-Use calls.
+Have these in place before you start. Without an A365 agent identity and the
+tooling gateway, there is nothing to authorize your Computer-Use calls.
 
 | You need | A365 reference (owned by A365 — follow it directly) |
 |----------|------------------------------------------------------|
@@ -76,11 +53,37 @@ and the tooling gateway, there is nothing to authorize your Computer-Use calls.
 | A tenant role: **Global Administrator** or **Agent ID Developer**, plus Azure subscription access | [Setup agent blueprint › Prerequisites](https://learn.microsoft.com/en-us/microsoft-agent-365/developer/registration) |
 | Understanding of **agent blueprint**, **agent identity**, and **agent user** | [Agent identity](https://learn.microsoft.com/en-us/entra/agent-id/agent-users) · [Agent OAuth protocols](https://learn.microsoft.com/en-us/entra/agent-id/agent-oauth-protocols) |
 
+### Licenses
+
+You need an **Agent 365** license in your tenant, plus the standard Windows 365
+prerequisite licenses from the
+[Windows 365 requirements](https://learn.microsoft.com/en-us/windows-365/enterprise/requirements?tabs=enterprise%2Cent)
+list:
+
+| License | Why it's needed |
+|---------|-----------------|
+| **Agent 365** | Windows 365 for Agents is consumed through Agent 365. Available standalone, or included with **Microsoft 365 E7** — see [Microsoft Agent 365 plans and pricing](https://www.microsoft.com/en-us/microsoft-agent-365). |
+| **Windows Enterprise E3** (or higher) | Underlying Windows entitlement, per the Windows 365 requirements. |
+| **Microsoft Intune** | Create and manage the provisioning policy (Agents) and pools. |
+| **Microsoft Entra ID P1** | Identity and Conditional Access baseline. |
+
+> Unlike Windows 365 Enterprise, Windows 365 for Agents does **not** require a
+> per-user Windows 365 (Cloud PC) seat license. Cloud PC capacity is
+> consumption-based through a billing plan.
+
+### Also needed (Windows 365 side)
+
+- A **Windows 365 for Agents billing plan** (pay-as-you-go billing policy) and
+  access to the [Microsoft Intune admin center](https://intune.microsoft.com) for
+  pool management. See
+  [Set up billing](https://learn.microsoft.com/en-us/windows-365/agents/billing-w365a)
+  and [Cloud PC Pools & Provisioning](./cloud-pc-pools.md).
+
 ---
 
 ## Set up
 
-Four steps. Steps 1–3 are A365 (linked out); step 4 is Windows 365.
+Five steps. Steps 1–4 are A365 (linked out); step 5 is Windows 365.
 
 ### 1. Publish your agent blueprint in Entra
 
@@ -132,7 +135,26 @@ Administrator applies them to the blueprint:
 Until consent completes, Computer-Use calls return **403**. Details in
 [Add and manage tools](https://learn.microsoft.com/en-us/microsoft-agent-365/developer/tooling).
 
-### 4. Provision a Cloud PC agent pool (Windows 365)
+### 4. Create an agent user
+
+Your agent acts as a dedicated **agent user** at runtime — an identity separate
+from any human user. This is the identity that will be assigned to a Cloud PC
+pool in the next step, and whose token authorizes every Computer-Use call.
+
+Create the agent instance (and its agent user) from the blueprint you published
+in step 1. Agent creation and management are A365 concerns, handled through the
+A365 CLI and Microsoft Entra — see
+[Setup agent blueprint](https://learn.microsoft.com/en-us/microsoft-agent-365/developer/registration)
+and [Agent user identity](https://learn.microsoft.com/en-us/entra/agent-id/agent-users).
+
+Note the agent user's identity (its UPN or object ID). You need it to assign the
+agent to a pool in step 5.
+
+> **Why this matters for Windows 365:** a Cloud PC agent pool grants access to
+> *specific agents*. An agent that has no agent user, or whose agent user is not
+> assigned to a pool, cannot check out a Cloud PC even with a valid token.
+
+### 5. Provision a Cloud PC agent pool and assign your agent
 
 Pool management is Windows 365 territory and is fully self-service — not the ATG.
 Stand up a pool your agent can draw from using either path:
@@ -140,8 +162,16 @@ Stand up a pool your agent can draw from using either path:
 - **Microsoft Intune admin center** — create a provisioning policy (Agents). Recommended starting point.
 - **Microsoft Graph (Cloud PC APIs)** — programmatic pool management.
 
+**Assign your agent user to the pool.** When you create the provisioning policy,
+the **Agents** page is where you add the agent user from step 4. Only assigned
+agents can check out a Cloud PC from that pool. You can add or change agent
+assignments later by editing the policy — that change applies immediately and
+does not require reprovisioning.
+
 Both paths manage the same pools. See
-[Cloud PC Pools & Provisioning](./cloud-pc-pools.md#create-a-pool-provisioning-policy).
+[Cloud PC Pools & Provisioning](./cloud-pc-pools.md#create-a-pool-provisioning-policy)
+for the step-by-step flow, including
+[Step 2: Assign agents](./cloud-pc-pools.md#step-2-assign-agents).
 
 ---
 
@@ -194,40 +224,25 @@ Cloud PC → wait for `Ready` → call tools → release**.
 5. Release the Cloud PC      →  return the device to the pool (Computer-Get)
 ```
 
-The tool names below (`take_screenshot`, `click`, `type_text`) are built-in
-Computer-Use tools; see [MCP Tools](./mcp-tools.md) for the full catalog. The
-`tools` handle represents the Computer-Use server the SDK registered for you.
+Tools such as `take_screenshot`, `click`, and `type_text` are built-in
+Computer-Use tools; see [MCP Tools](./mcp-tools.md) for the full catalog and
+[API Reference](./api-reference.md) for the operations behind each step.
 
-```python
-# 1. Acquire a Cloud PC from your pool (returns a session context with a
-#    session link used for screen sharing). Supply an idempotency key so a
-#    retry returns the same device instead of allocating a second one.
-session = w365a.acquire_cloud_pc(pool_id=POOL_ID, idempotency_key=key)
-
-# 2. Wait until the device reports Ready before issuing tool calls.
-w365a.wait_until_ready(session)
-
-# 3. Drive the Cloud PC through the registered Computer-Use tools.
-print(tools.call("take_screenshot"))
-tools.call("click", {"x": 500, "y": 300})
-tools.call("type_text", {"text": "Hello from my agent!"})
-
-# 4. (Optional) Hand session.session_link to the screen-share SDK so a human
-#    can watch or take control. See ./screen-sharing.md
-
-# 5. Always release the Cloud PC when done.
-w365a.release_cloud_pc(session)
-```
+> **Working implementation:** rather than reproducing sample code here, see the
+> [Windows 365 for Agents Playground](../W365A-Playground-Agent/) — a complete,
+> runnable agent that wires up `mcp_W365ComputerUse`, manages the session
+> lifecycle, and forwards Cloud PC screenshots back to the user. The
+> [step-by-step tutorial](../W365A-Playground-Agent/step-by-step-tutorial.md)
+> walks the full setup, deploy, and troubleshooting path.
 
 > **Discover tools at runtime.** The live tool set is available via the MCP
 > `tools/list` method; the SDK surfaces it for you. Coordinates are screen pixels
-> with `(0, 0)` at top-left. For the operations behind `acquire` / `wait` /
-> `release`, see the [API Reference](./api-reference.md).
+> with `(0, 0)` at top-left.
 
 ### (Optional) Add a human viewer
 
 To let a human watch or take over, attach the screen-share SDK to the session
-using `session.session_link` from acquisition. See
+using the session link from acquisition. See
 [Screen Sharing](./screen-sharing.md).
 
 ---
