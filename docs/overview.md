@@ -10,7 +10,7 @@ These Cloud PCs are:
 - **Intune-managed:** governed by enterprise security policies
 - **Optimized for agentic workloads:** designed for AI agent automation
 
-To manage and allocate these resources, you create [provisioning policies](./provisioning.md) for Cloud PCs for Agents. Provisioning policies allow organizations and partners to group Cloud PCs into pools for different teams or workloads, ensuring consistent policy enforcement and cost control.
+To manage and allocate these resources, you create [provisioning policies](./cloud-pc-pools.md#create-a-pool-provisioning-policy) for Cloud PCs for Agents. Provisioning policies allow organizations and partners to group Cloud PCs into pools for different teams or workloads, ensuring consistent policy enforcement and cost control.
 
 Agents interact with Cloud PCs using a **check-in / check-out model**. When an agent needs to perform a task, it checks out a Cloud PC; once the task is complete, the agent checks the Cloud PC back in, making it available for others. This approach maximizes resource efficiency and keeps costs predictable.
 
@@ -34,7 +34,8 @@ Windows 365 for Agents enables agent makers to:
 
 ## Regions Available
 
-For public preview, Windows 365 for Agents is available in the **United States**.
+Windows 365 for Agents is **globally available** in all supported regions where
+Cloud PC provisioning is supported.
 
 ## Device Management
 
@@ -46,8 +47,8 @@ Cloud PCs for Agents are managed through the [Microsoft Intune admin center](htt
 
 ## Next Steps
 
+- [Getting Started](./getting-started.md) — the end-to-end onboarding flow and first call
 - [Architecture Overview](./architecture.md)
 - [Authentication](./authentication.md)
-- [Onboarding](./onboarding.md)
 - [Agent Session Lifecycle](./sessions.md)
-- [Quick Start](./quickstart.md)
+- [MCP Tools](./mcp-tools.md)

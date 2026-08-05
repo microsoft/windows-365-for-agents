@@ -10,12 +10,12 @@
 </div>
 
 
-[![Status](https://img.shields.io/badge/status-public%20preview-blue)](https://learn.microsoft.com/en-us/windows-365/public-preview)
+[![Status](https://img.shields.io/badge/status-generally%20available-brightgreen)](https://learn.microsoft.com/en-us/windows-365/agents/cloud-pc-agent-pools)
 [![Docs: CC-BY-4.0](https://img.shields.io/badge/docs-CC--BY--4.0-blue.svg)](./LICENSE.md) [![Code: MIT](https://img.shields.io/badge/code-MIT-blue.svg)](./W365A-Playground-Agent/LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![MCP](https://img.shields.io/badge/protocol-MCP-purple)](https://modelcontextprotocol.io)
 
-[Documentation](./docs/) · [Quick Start](#quick-start) · [API Reference](./docs/api-reference.md) · [Examples](./docs/quickstart.md)
+[Documentation](./docs/) · [Getting Started](./docs/getting-started.md) · [Quick Start](#quick-start) · [API Reference](./docs/api-reference.md)
 
 </div>
 
@@ -31,8 +31,8 @@ Built on the [Windows 365](https://learn.microsoft.com/en-us/windows-365/overvie
 
 - 🖥️ **Secure Cloud PCs** — Entra ID-joined, Intune-managed, governed by enterprise security policies
 - 🔄 **Check-in / Check-out model** — Agents reserve a Cloud PC per task and return it when done
-- 🤖 **62 MCP tools** — 26 desktop tools (mouse/keyboard, windows, processes, shell, Python) and 36 browser tools (navigation, DOM interaction, accessibility refs, batch actions)
-- 👁️ **Real-time screen sharing** — Human-in-the-loop observation and takeover via WebRTC, embedded with the browser-side Screenshare SDK
+- 🤖 **65 MCP tools** — 3 session-management tools plus 26 desktop tools (mouse/keyboard, windows, processes, shell, Python) and 36 browser tools (navigation, DOM interaction, accessibility refs, batch actions)
+- 👁️ **Real-time screen sharing** — Human-in-the-loop observation and takeover via WebRTC, embedded with the integrated screen-share SDK
 - 🏢 **Enterprise-grade** — Conditional Access, compliance, audit trails built in
 - ⚡ **Pool-based scaling** — Provision pools of Cloud PCs; agents request capability, not specific machines
 
@@ -41,15 +41,15 @@ Built on the [Windows 365](https://learn.microsoft.com/en-us/windows-365/overvie
 | Topic | Description |
 |-------|-------------|
 | [Overview](./docs/overview.md) | What is Windows 365 for Agents, platform capabilities, supported regions |
-| [Quick Start](./docs/quickstart.md) | Step-by-step guide: prerequisites → first agent session |
+| [Getting Started](./docs/getting-started.md) | The onboarding flow: Understand → Prerequisites → Set up → Build → Validate → Manage → Troubleshoot, ending with your first Computer-Use call |
 | [Architecture](./docs/architecture.md) | Four-plane architecture: Create, Get, Do, See |
 | [Session Lifecycle](./docs/sessions.md) | Prepare → Acquire → Connect → Act → Release |
-| [Cloud PC Pools](./docs/cloud-pc-pools.md) | Pool concepts, status, management |
-| [Provisioning](./docs/provisioning.md) | Create and manage provisioning policies in Intune |
-| [API Reference](./docs/api-reference.md) | Session checkout/checkin, MCP endpoint, Screenshare SDK |
-| [MCP Tools](./docs/mcp-tools.md) | All 62 built-in tools: desktop, browser, accessibility |
-| [Screen Sharing](./docs/screen-sharing.md) | Screenshare SDK (`screenshare-embed.js`) for human-in-the-loop observation and shared control |
-| [Security](./docs/security.md) | Identity, Entra integration, Zero Trust, authentication |
+| [Cloud PC Pools & Provisioning](./docs/cloud-pc-pools.md) | Pool concepts, status, and creating/managing pools in Intune (backed by Microsoft Graph) |
+| [Authentication](./docs/authentication.md) | The agent-user token your agent sends, and the A365 identity model |
+| [API Reference](./docs/api-reference.md) | The A365 tooling gateway (ATG) surface: acquire/release a Cloud PC, status, and tool calls |
+| [MCP Tools](./docs/mcp-tools.md) | All 65 tools: session management, desktop, browser, accessibility |
+| [Screen Sharing](./docs/screen-sharing.md) | The integrated screen-share SDK for human-in-the-loop observation and shared control |
+| [Security](./docs/security.md) | Identity, Entra integration, Zero Trust, governance |
 | [FAQ](./docs/faq.md) | Common questions and troubleshooting |
 
 ## Architecture at a Glance
@@ -75,7 +75,7 @@ Built on the [Windows 365](https://learn.microsoft.com/en-us/windows-365/overvie
 │  │  ┌────────────┐ ┌─────────┐  │                           │
 │  │  │Computer-Do │ │Computer-│  │                           │
 │  │  │ (MCP Tools)│ │  See    │  │                           │
-│  │  │ 62 tools   │ │(Screen  │  │                           │
+│  │  │ 65 tools   │ │(Screen  │  │                           │
 │  │  │ Desktop,   │ │ Share)  │  │                           │
 │  │  │ Browser,   │ │ WebRTC  │  │                           │
 │  │  │ A11y       │ │         │  │                           │
@@ -86,98 +86,15 @@ Built on the [Windows 365](https://learn.microsoft.com/en-us/windows-365/overvie
 
 ## Quick Start
 
-> **Prerequisites:** An Entra ID app registration and a provisioned Cloud PC agent pool. See [Getting Started](./docs/quickstart.md) for full setup.
+> **Prerequisites:** an Agent 365 (A365) agent blueprint published in Entra with the Windows 365 Computer-Use MCP server added and consented, plus a provisioned Cloud PC agent pool. The [Getting Started](./docs/getting-started.md) guide walks the full setup step by step.
 
-```python
-import httpx
-import json
-import uuid
+Windows 365 for Agents builds on **A365 identity and tooling**. Your agent authenticates as an A365 agent user and reaches the Computer-Use tools through the A365 tooling gateway (ATG). The simplest path is to register the Computer-Use MCP server with the [Agent 365 SDK](https://learn.microsoft.com/en-us/microsoft-agent-365/developer/agent-365-sdk?tabs=python): it performs the token exchange and the MCP handshake for you, then exposes the tools to your orchestrator.
 
-# --- Configuration ---
-TENANT_ID     = "your-tenant-id"
-CLIENT_ID     = "your-app-client-id"
-CLIENT_SECRET = "your-app-secret"
-POOL_ID       = "your-pool-id"
-USER_OID      = "your-aad-user-object-id"
-REGION        = "canadacentral"  # Test regions: canadacentral, eastus2
-SESSION_BASE  = f"https://{REGION}.sessionmanagement.regional.cloudinferenceplatform.azure-test.net"
+Once the tools are registered, the Windows 365 specific runtime loop is **acquire a Cloud PC, wait for `Ready`, call tools, release**. Tools such as `take_screenshot`, `click`, and `type_text` are built in; see [MCP Tools](./docs/mcp-tools.md) for the full catalog.
 
-# 1. Acquire token
-token_resp = httpx.post(
-    f"https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/token",
-    data={
-        "client_id": CLIENT_ID,
-        "client_secret": CLIENT_SECRET,
-        "scope": "api://W365Agents-Int/.default",  # Test/Int audience
-        "grant_type": "client_credentials",
-    },
-)
-TOKEN = token_resp.json()["access_token"]
+For a complete, runnable implementation, see the [Windows 365 for Agents Playground](./W365A-Playground-Agent/) sample and its [step-by-step tutorial](./W365A-Playground-Agent/step-by-step-tutorial.md).
 
-# 2. Checkout session (reserves a Cloud PC)
-session_id = str(uuid.uuid4())
-checkout = httpx.post(
-    f"{SESSION_BASE}/api/pools/{POOL_ID}/sessions",
-    params={"api-version": "2.0"},
-    headers={
-        "Authorization": f"Bearer {TOKEN}",
-        "user-object-id": USER_OID,
-        "x-ms-sessionId": session_id,      # Idempotency key — always include
-    },
-    timeout=35.0,
-)
-session = checkout.json()
-computer_url = session["computerUrl"]
-computer_id  = computer_url.split("/computers/")[1]
-
-# 3. Initialize MCP (required once per session)
-MCP_ENDPOINT = f"{computer_url}/mcp"
-MCP_HEADERS  = {
-    "Authorization": f"Bearer {TOKEN}",
-    "x-ms-computerId": computer_id,
-    "Content-Type": "application/json",
-}
-
-def mcp_call(method, params=None, msg_id=1):
-    body = {"jsonrpc": "2.0", "id": msg_id, "method": method}
-    if params:
-        body["params"] = params
-    resp = httpx.post(MCP_ENDPOINT, headers=MCP_HEADERS,
-                      params={"api-version": "1.0"},
-                      content=json.dumps(body), timeout=35.0)
-    return resp.json()
-
-mcp_call("initialize", {
-    "protocolVersion": "2024-11-05",
-    "capabilities": {},
-    "clientInfo": {"name": "MyAgent", "version": "1.0"},
-})
-
-# Send the initialized notification (no id, no response expected) before any tool call
-httpx.post(MCP_ENDPOINT, headers=MCP_HEADERS,
-           params={"api-version": "1.0"},
-           content=json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}),
-           timeout=35.0)
-
-# 4. Take a screenshot
-screenshot = mcp_call("tools/call",
-    {"name": "take_screenshot", "arguments": {}}, msg_id=2)
-print(screenshot)
-
-# 5. Click at coordinates
-mcp_call("tools/call",
-    {"name": "click", "arguments": {"x": 500, "y": 300}}, msg_id=3)
-
-# 6. Checkin (release the Cloud PC) — x-ms-sessionId is required and must match the path
-httpx.delete(
-    f"{SESSION_BASE}/api/sessions/{session_id}",
-    params={"api-version": "2.0"},
-    headers={
-        "Authorization": f"Bearer {TOKEN}",
-        "x-ms-sessionId": session_id,
-    },
-)
-```
+Prefer plain MCP over HTTP instead of the full SDK? The ATG exposes a standard MCP surface, so a thin client plus the agent-user bearer works too. See [Getting Started](./docs/getting-started.md) and the [API Reference](./docs/api-reference.md).
 
 ## Samples
 

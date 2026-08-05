@@ -1,6 +1,43 @@
 # MCP Tool Reference
 
-Windows 365 for Agents ships **62 built-in tools**, invoked via `tools/call` over the [MCP endpoint](./api-reference.md#mcp-model-context-protocol). Coordinates use screen pixels with `(0, 0)` at top-left. Discover tools at runtime via `tools/list`.
+The `mcp_W365ComputerUse` server exposes **65 tools**: 3 session-management tools plus 62 Computer-Use tools (26 desktop, 36 browser). All are invoked via `tools/call` through the [A365 tooling gateway (ATG)](./api-reference.md#how-you-talk-to-the-atg). Coordinates use screen pixels with `(0, 0)` at top-left. Discover the live tool set at runtime via `tools/list`.
+
+> **Authoritative reference:** [Windows 365 for Agents MCP server](https://learn.microsoft.com/en-us/microsoft-copilot-studio/mcp-windows-365-agents)
+> on Microsoft Learn documents every tool and its parameters.
+
+> **Browser automation runs on Microsoft Edge.** Edge launches automatically on the first browser tool call. `focus_browser` can also target Chrome or Firefox, but DOM-level browser tools only work on the Edge instance.
+
+---
+
+## Session Management (3)
+
+Every Computer-Use session starts with `mcp_W365ComputerUse_StartSession` and should end with `mcp_W365ComputerUse_EndSession`. The `sessionId` returned at start is passed on subsequent calls. See [Session Lifecycle](./sessions.md) and [API Reference](./api-reference.md).
+
+### `mcp_W365ComputerUse_StartSession`
+
+Starts a Windows 365 Computer Use session, establishing a connection to a Cloud PC and allocating a Cloud PC resource. Returns the `sessionId` used to manage the session.
+
+No required parameters.
+
+**Returns:** JSON including `sessionId` (and, on start, a screen-share URL for [Computer-See](./screen-sharing.md)).
+
+### `mcp_W365ComputerUse_GetSessionDetails`
+
+Returns metadata for one Computer Use session identified by the `sessionId`. Does not list multiple sessions.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `sessionId` | string | Yes | - | The `sessionId` returned by `mcp_W365ComputerUse_StartSession` |
+
+### `mcp_W365ComputerUse_EndSession`
+
+Ends an active Computer Use session and releases the associated Cloud PC resources back to the pool.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `sessionId` | string | Yes | - | The `sessionId` returned by `mcp_W365ComputerUse_StartSession` |
+
+> Always end sessions explicitly. Idle sessions are reclaimed automatically after about 30 minutes of inactivity.
 
 ---
 
@@ -48,14 +85,14 @@ Drag from start to end. Also useful for pixel-precise scrolling.
 
 ### `scroll`
 
-Scroll in notches (NOT pixels). 3 notches is about one page. Positive `scrollY` = down, `scrollX` = right. Clamped to [-20, 20].
+Scroll in notches (NOT pixels). 3 notches is about one page. Positive `deltaY` = down, `deltaX` = right. Clamped to [-20, 20].
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `x` | int | Yes | - | Scroll position X |
 | `y` | int | Yes | - | Scroll position Y |
-| `scrollX` | int | No | 0 | Horizontal notches (positive = right) |
-| `scrollY` | int | No | 0 | Vertical notches (positive = down) |
+| `deltaX` | int | No | 0 | Horizontal notches (positive = right) |
+| `deltaY` | int | No | 0 | Vertical notches (positive = down) |
 
 ### `type_text`
 
@@ -64,6 +101,7 @@ Type text via keyboard simulation. For shortcuts use `press_keys`. For browser f
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `text` | string | Yes | - | Text to type |
+| `usePaste` | bool | No | false | Paste text from the clipboard instead of typing it |
 
 ### `press_keys`
 
@@ -583,11 +621,13 @@ Focus a browser window (Edge, Chrome, Firefox). Optionally filter by URL or titl
 
 | Family | Count | Description |
 |--------|-------|-------------|
+| Session Management | 3 | Start, inspect, and end a Computer Use session |
 | Desktop Interaction | 26 | Mouse, keyboard, screenshots, windows, shell, clipboard, processes, accessibility |
 | Browser Automation | 36 | Navigation, DOM interaction, tabs, forms, snapshots, ref-based actions, cookies, batch, PDF |
+| **Total** | **65** | |
 
 ## Next Steps
 
 - [API Reference](./api-reference.md): endpoint details
-- [Quick Start](./quickstart.md): copy-paste Python example
+- [Getting Started](./getting-started.md): onboarding flow and first call
 - [Screen Sharing](./screen-sharing.md): human observation

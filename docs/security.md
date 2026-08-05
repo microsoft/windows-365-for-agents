@@ -1,4 +1,4 @@
-# Identity & Security
+# Identity, Security & Governance
 
 Windows 365 for Agents delivers a secure execution environment for agent workloads by combining **Microsoft Entra identity**, **Cloud PC isolation**, and **Microsoft 365 security controls**, governed end-to-end by Zero Trust principles.
 
@@ -119,6 +119,8 @@ When approvals or additional checks are needed, challenges are handled **outside
 
 ## Next Steps
 
+- [Getting Started](./getting-started.md)
 - [Architecture Overview](./architecture.md)
+- [Authentication](./authentication.md)
 - [Session Lifecycle](./sessions.md)
 - [API Reference](./api-reference.md)
