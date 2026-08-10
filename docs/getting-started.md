@@ -135,6 +135,25 @@ Administrator applies them to the blueprint:
 Until consent completes, Computer-Use calls return **403**. Details in
 [Add and manage tools](https://learn.microsoft.com/en-us/microsoft-agent-365/developer/tooling).
 
+The MCP path uses two independent permission layers:
+
+- **Agent Tools** (`ea9ffc3e-8a23-4a7d-836d-234d7c7565c1`) with
+  `McpServersMetadata.Read.All` for server discovery.
+- Each MCP server in `ToolingManifest.json` with `Tools.ListInvoke.All` for
+  tool listing and invocation.
+
+Verify both the grants and their inheritance:
+
+```powershell
+a365 query-entra blueprint-scopes
+a365 query-entra inheritance
+```
+
+If an Agent Tools token fails with `AADSTS65001` while the individual MCP server
+tokens succeed, repair `McpServersMetadata.Read.All`; the per-server permissions
+are already healthy. Agent identities should inherit these permissions from the
+blueprint rather than receive duplicate direct grants.
+
 ### 4. Create an agent user
 
 Your agent acts as a dedicated **agent user** at runtime — an identity separate
