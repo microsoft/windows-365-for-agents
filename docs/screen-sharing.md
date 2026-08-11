@@ -68,10 +68,11 @@ The expected state has three parts:
 Agent instances inherit ARI from the blueprint. Don't create duplicate
 principal-scoped grants on each instance.
 
-`inheritableScopes=allAllowed` means all ARI scopes already granted to the
+`inheritableScopes.kind=allAllowed` means all ARI scopes already granted to the
 blueprint are inheritable; it does not grant every scope exposed by ARI. Because
-this integration uses delegated scopes only, `inheritableRoles=noRoles` is a
-valid least-privileged configuration.
+this integration uses delegated scopes only, set
+`inheritableRoles.@odata.type=#microsoft.graph.noRoles` and
+`inheritableRoles.kind=none` for a valid least-privileged configuration.
 
 Verify:
 
