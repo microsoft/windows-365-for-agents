@@ -6,8 +6,8 @@ through a different surface, and it is important to keep them straight:
 | Plane | What it does | Reached via |
 |-------|--------------|-------------|
 | **Computer-Create** | Manage Cloud PC pools (create, size, image, delete) | **Microsoft Graph** + Intune admin center |
-| **Computer-Get / Computer-Do** | Acquire and release a Cloud PC (session management), then drive it (actions) | **A365 tooling gateway (ATG)** — the A365 endpoint, spoken as MCP |
-| **Computer-See** | Real-time screen sharing and shared control for a human | **Screen-share SDK**, using the session link from acquisition |
+| **Computer-Get / Computer-Do** | Start and end a Cloud PC session (MCP session management), then drive it (actions) | **A365 tooling gateway (ATG)** — the A365 endpoint, spoken as MCP |
+| **Computer-See** | Real-time screen sharing and shared control for a human | **Screen-share SDK**, using the session link returned by Start Session |
 
 - **Pool management** is not part of this reference — it is Microsoft Graph. See
   [Cloud PC Pools & Provisioning](./cloud-pc-pools.md).
@@ -37,10 +37,16 @@ Every call carries the agent-user bearer token described in
 ## How You Talk to the ATG
 
 The ATG speaks the [Model Context Protocol](https://modelcontextprotocol.io)
-over Streamable HTTP (with SSE). You do **not** need to hand-roll the protocol:
-register the Computer-Use server with the Agent 365 SDK and it performs the MCP
-`initialize` → `tools/list` → `tools/call` handshake for you with the agent-user
-bearer. See [Add and manage tools](https://learn.microsoft.com/en-us/microsoft-agent-365/developer/tooling)
+over Streamable HTTP (with SSE). Sessions follow the MCP
+[session management](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#session-management)
+model, so the operations below are named accordingly: **Start Session**,
+**Get Session Details**, and **End Session**.
+
+You do **not** need to hand-roll the protocol: register the Computer-Use server
+with the Agent 365 SDK and it performs the MCP `initialize` → `tools/list` →
+`tools/call` handshake for you with the agent-user bearer, including the
+`Mcp-Session-Id` header that binds subsequent calls to your session. See
+[Add and manage tools](https://learn.microsoft.com/en-us/microsoft-agent-365/developer/tooling)
 for the generic MCP client setup, and
 [Getting Started › Make your first Computer-Use call](./getting-started.md#make-your-first-computer-use-call)
 for a minimal example.
@@ -51,15 +57,15 @@ The rest of this page describes the operations exposed through that surface.
 
 | Operation | Plane | Purpose |
 |-----------|-------|---------|
-| **Acquire (checkout)** | Computer-Get | Reserve a Cloud PC from a pool; returns a session identity and a session link |
-| **Get Computer Status** | Computer-Get | Report device readiness (`Waiting` / `Live` / `Ready`) |
-| **Release (checkin)** | Computer-Get | Return the Cloud PC to the pool |
+| **Start Session** | Computer-Get | Reserve a Cloud PC from a pool; returns a session identity and a session link |
+| **Get Session Details** | Computer-Get | Report session and device readiness (`Waiting` / `Live` / `Ready`) |
+| **End Session** | Computer-Get | Return the Cloud PC to the pool and close the session |
 | **Tool call** | Computer-Do | Invoke one of the built-in Computer-Use tools (see [MCP Tools](./mcp-tools.md)) |
 
-### Acquire a Cloud PC
+### Start Session
 
 Reserves a Cloud PC from your pool and returns the session context, including the
-**session link** used for screen sharing. Acquisition may take up to **30
+**session link** used for screen sharing. Starting a session may take up to **30
 seconds** while a device is assigned.
 
 The response includes:
@@ -70,27 +76,27 @@ The response includes:
   [Screen Sharing](./screen-sharing.md)). It may also return a `connectivityUrl`,
   which can be null and is not required.
 
-> **Retry safely.** Supply an idempotency key (a GUID) on acquire. If a network
-> timeout triggers a retry, the same session is returned instead of allocating a
-> second device. Reusing the same key later returns the existing session rather
-> than creating a new one.
+> **Retry safely.** Supply an idempotency key (a GUID) on Start Session. If a
+> network timeout triggers a retry, the same session is returned instead of
+> allocating a second device. Reusing the same key later returns the existing
+> session rather than creating a new one.
 
-### Get Computer Status
+### Get Session Details
 
-A freshly assigned Cloud PC can take a few seconds to become ready. Poll status
-and wait for **`Ready`** before issuing tool calls. Tool calls against a device
-that is not ready return a *device-not-ready* error — retry after 2 to 5 seconds,
-up to about 30 seconds total.
+A freshly assigned Cloud PC can take a few seconds to become ready. Poll session
+details and wait for **`Ready`** before issuing tool calls. Tool calls against a
+device that is not ready return a *device-not-ready* error — retry after 2 to 5
+seconds, up to about 30 seconds total.
 
 `status` is one of **`Waiting`**, **`Live`**, or **`Ready`**. If no status has
 been recorded yet, it defaults to `Waiting`.
 
-### Release a Cloud PC
+### End Session
 
-Releases the session and returns the Cloud PC to the pool. Release is
+Ends the session and returns the Cloud PC to the pool. End Session is
 fire-and-forget: acceptance is immediate and cleanup completes asynchronously.
-Always release explicitly when your work is done — idle sessions are reclaimed
-automatically (see [Session limits](#session-limits)).
+Always end the session explicitly when your work is done — idle sessions are
+reclaimed automatically (see [Session limits](#session-limits)).
 
 ## Tool Calls (Computer-Do)
 
@@ -109,7 +115,7 @@ pixels with `(0, 0)` at top-left. The full catalog is in
 ## Session Limits
 
 Idle sessions are evicted after **30 minutes of inactivity**. Any tool call or
-screen-share request counts as activity. Always release sessions explicitly when
+screen-share request counts as activity. Always end sessions explicitly when
 done; see the [FAQ](./faq.md) for keep-alive guidance.
 
 ## Common Errors
@@ -118,9 +124,9 @@ done; see the [FAQ](./faq.md) for keep-alive guidance.
 |---------|--------------|--------|
 | **401 Unauthorized** | Token missing, expired, or wrong audience | Refresh the agent-user token (let the SDK handle it) and retry. See [Authentication](./authentication.md). |
 | **403 Forbidden** | Agent not authorized to call Computer-Use for this tenant | Confirm the MCP server is on your blueprint and admin consent was granted. See [Getting Started](./getting-started.md). |
-| **Device not ready** | Cloud PC still starting up | Poll status; retry after 2–5 seconds, up to ~30 seconds total. |
-| **Conflict on acquire** | A session already exists in a conflicting state | Release it, then retry. |
-| **Timeout on acquire** | Device provisioning took too long | Retry with the same idempotency key. |
+| **Device not ready** | Cloud PC still starting up | Call Get Session Details; retry after 2–5 seconds, up to ~30 seconds total. |
+| **Conflict on Start Session** | A session already exists in a conflicting state | End it, then retry. |
+| **Timeout on Start Session** | Device provisioning took too long | Retry with the same idempotency key. |
 
 ## Next Steps
 
