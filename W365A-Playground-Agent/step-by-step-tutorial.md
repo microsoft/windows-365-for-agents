@@ -245,6 +245,29 @@ a365 setup permissions mcp   # grants MCP server scopes
 a365 setup permissions bot   # grants Messaging Bot API permissions (must run AFTER mcp)
 ```
 
+The MCP command configures Agent Tools metadata discovery
+(`McpServersMetadata.Read.All`) and each configured server's
+`Tools.ListInvoke.All` scope.
+
+The sample's **Watch live** feature also needs ARI permissions:
+
+```powershell
+a365 setup permissions custom `
+  --resource-app-id 90ecec28-f5a6-42b3-9bde-dae1ca98f8b5 `
+  --scopes "Computer.See,Computer.Control"
+```
+
+Verify the blueprint grants and inheritance:
+
+```powershell
+a365 query-entra blueprint-scopes
+a365 query-entra inheritance
+```
+
+Agent identities should inherit permissions from the blueprint. Avoid
+per-instance direct grants; they duplicate access and can drift from the
+blueprint policy.
+
 ### 6. Verify / customize appsettings.json
 
 By this point most of `src/appsettings.json` is already populated:
@@ -483,25 +506,24 @@ The defaults below are intentionally conservative for a demo agent. To raise eit
 
 **Agent boots and `/api/messages` works, but no `MCP tools loaded` line ever appears in the log**
 
-> **Context — V1 → V2 Agent 365 transition.** Agent 365 is in the middle of migrating its MCP scope model from a per-server "V1" scheme (`McpServers.<Category>.All` granted at the blueprint level and inherited by instances) to a per-tool "V2" scheme. During the rollout, some blueprints provisioned by `a365 setup all` end up with only the V2 metadata scope (`McpServersMetadata.Read.All`) on the blueprint's `inheritablePermissions`, missing the per-server V1 scopes that the platform still checks at runtime. The fix below is a manual workaround — the canonical behavior is whatever the Agent 365 team converges on, and they have the final say. If the workaround stops being necessary in your tenant, you can safely remove the patched scopes. If you hit unexpected behavior, file with the Agent 365 team at [`microsoft/Agent365-devTools` issues](https://github.com/microsoft/Agent365-devTools/issues).
+Agent 365's current MCP model has two separate token requests:
 
-→ The blueprint's `inheritablePermissions` for the Agent 365 Tools resource (`ea9ffc3e-8a23-4a7d-836d-234d7c7565c1`, Work IQ Tools) only has `McpServersMetadata.Read.All` — enough for the MCP discovery call to succeed (HTTP 200) but no per-server `McpServers.<X>.All` scopes, so the response comes back empty.
+- Agent Tools metadata discovery with `McpServersMetadata.Read.All`.
+- Per-server access with `Tools.ListInvoke.All`.
 
-This property isn't exposed in the Azure portal — it lives only in Microsoft Graph beta API. Inspect it with:
+Run the idempotent permission setup again as Global Administrator and verify
+inheritance:
 
 ```powershell
+a365 setup permissions mcp --verbose
 a365 query-entra blueprint-scopes
+a365 query-entra inheritance
 ```
 
-Look for the entry with `Resource: Unknown Resource (ea9ffc3e-8a23-4a7d-836d-234d7c7565c1)`. If its **Inheritable Scopes** list only contains `McpServersMetadata.Read.All`, expand it via Graph API PATCH. Replace `<blueprint-app-id>` with the value of `Connections:ServiceConnection:ClientId` from your `appsettings.json`, and add one `McpServers.<Category>.All` per MCP server in your `ToolingManifest.json` (e.g. Mail, W365ComputerUse, Teams — the category names match the server names):
-
-```powershell
-az rest --method PATCH `
-  --uri "https://graph.microsoft.com/beta/applications/microsoft.graph.agentIdentityBlueprint/<blueprint-app-id>/inheritablePermissions/ea9ffc3e-8a23-4a7d-836d-234d7c7565c1" `
-  --body '{"inheritableScopes":{"@odata.type":"#microsoft.graph.enumeratedScopes","kind":"enumerated","scopes":["McpServersMetadata.Read.All","McpServers.Mail.All","McpServers.W365ComputerUse.All","McpServers.Teams.All"]}}'
-```
-
-Restart the deployed agent (or wait for its token cache to refresh) — existing agent instances pick up the new inheritable scopes on their next token request; no need to recreate the instance.
+If `AADSTS65001` targets **Agent Tools**, repair the metadata grant/inheritance
+rather than changing the individual server permissions. Existing instances pick
+up corrected blueprint inheritance on their next token request; don't add
+duplicate direct grants.
 
 **`AADSTS82001: Agentic application is not permitted to request app-only tokens` — agent accepts messages but sends no responses**
 → The agent blueprint cannot use `ClientSecret` + client credentials flow to call the Messaging Bot API. Root cause: `managedIdentityPrincipalId` is `null` in `a365.generated.config.json`, meaning managed identity setup was not completed. Fix: re-run `a365 setup all` to complete the managed identity setup. After it completes, `managedIdentityPrincipalId` should be populated. Keep `AuthType: "UserManagedIdentity"` in `appsettings.json`.

@@ -46,6 +46,76 @@ host.
 - An agent token carrying the **`Computer.See`** scope (view) and, for shared
   control, **`Computer.Control`**. See [Authentication](./authentication.md).
 
+### Configure Agent 365 blueprint permissions
+
+For agentic screen sharing, configure ARI on the agent identity blueprint:
+
+```powershell
+a365 setup permissions custom `
+  --resource-app-id 90ecec28-f5a6-42b3-9bde-dae1ca98f8b5 `
+  --scopes "Computer.See,Computer.Control"
+```
+
+The expected state has three parts:
+
+1. The blueprint declares `Computer.See` and `Computer.Control` for
+   W365Agents-Production.
+2. The blueprint service principal has an `AllPrincipals` OAuth grant for those
+   scopes.
+3. W365Agents-Production appears in the blueprint's `inheritablePermissions`
+   collection with scope inheritance enabled.
+
+Agent instances inherit ARI from the blueprint. Don't create duplicate
+principal-scoped grants on each instance.
+
+`inheritableScopes.kind=allAllowed` means all ARI scopes already granted to the
+blueprint are inheritable; it does not grant every scope exposed by ARI. Because
+this integration uses delegated scopes only, set
+`inheritableRoles.@odata.type=#microsoft.graph.noRoles` and
+`inheritableRoles.kind=none` for a valid least-privileged configuration.
+
+Verify:
+
+```powershell
+a365 query-entra blueprint-scopes
+a365 query-entra inheritance
+```
+
+Some CLI versions can complete the permission declaration but stop before
+adding inheritance. If the blueprint OAuth grant already exists, add only the
+missing inheritance entry through Microsoft Graph:
+
+```powershell
+Connect-MgGraph `
+  -TenantId "<tenant-id>" `
+  -Scopes "AgentIdentityBlueprint.ReadWrite.All"
+
+$uri = "https://graph.microsoft.com/v1.0/applications/" +
+       "microsoft.graph.agentIdentityBlueprint/<blueprint-app-id>/" +
+       "inheritablePermissions"
+
+$body = @{
+    resourceAppId = "90ecec28-f5a6-42b3-9bde-dae1ca98f8b5"
+    inheritableScopes = @{
+        "@odata.type" = "#microsoft.graph.allAllowedScopes"
+        kind = "allAllowed"
+    }
+    inheritableRoles = @{
+        "@odata.type" = "#microsoft.graph.noRoles"
+        kind = "none"
+    }
+} | ConvertTo-Json -Depth 5
+
+Invoke-MgGraphRequest `
+  -Method POST `
+  -Uri $uri `
+  -Body $body `
+  -ContentType "application/json"
+```
+
+Use `POST` only when no entry exists for the ARI resource. If one exists, use
+the resource-specific URL with `PATCH`.
+
 ## Integration Flow
 
 ```
