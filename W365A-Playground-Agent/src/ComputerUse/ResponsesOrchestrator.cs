@@ -597,9 +597,9 @@ bool recovered = false;
 
             // Aggressive auto-(re)offer of the "Watch live" card: if this iteration did any CUA work
             // (StartSession, a W365 supplementary desktop tool, or a native computer_call) and the
-            // selected session has NO live/redeemable card, send a fresh one so the hirer can always
+            // selected session has NO live/redeemable card, send a fresh one so the user can always
             // watch — including after they closed/stopped a prior view or let an offer expire. Bounded
-            // to one attempt per turn so a failing mint (e.g. unresolved hirer) can't spam.
+            // to one attempt per turn so a failed offer can't spam.
             if (!screenshareOfferAttempted && offerScreenshareAsync is not null)
             {
                 // EndSession is the sole CUA tool that must NOT (re)offer a card: the session is being

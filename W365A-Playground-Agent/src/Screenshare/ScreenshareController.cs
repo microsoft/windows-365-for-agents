@@ -3,9 +3,6 @@
 
 using System.Security.Cryptography;
 
-using Microsoft.AspNetCore.Authentication;
-using Microsoft.AspNetCore.Authentication.Cookies;
-using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
@@ -13,50 +10,27 @@ using Microsoft.Extensions.Options;
 namespace Microsoft.W365APlaygroundAgent.Screenshare;
 
 /// <summary>
-/// Screenshare viewer page + redeem + state endpoints. The viewer requires an interactive Entra
-/// sign-in (OIDC): endpoints are [AllowAnonymous] to the bot-JWT scheme and instead authenticate the
-/// opener via the "Cookies" scheme (challenging OpenIdConnect when unauthenticated), then enforce
-/// opener==hirer here. The agentic Teams surface can't host task-module dialogs or getAuthToken, so
-/// the viewer opens as a top-level browser page launched by the card's Action.OpenUrl.
+/// Screenshare viewer page + redeem + state endpoints. They are anonymous to the bot-JWT scheme:
+/// the opaque ticket is the initial capability, the first successful redemption atomically claims
+/// it, and a separate HttpOnly cookie binds later requests to that browser.
 /// </summary>
 [ApiController]
 [AllowAnonymous]
 public sealed class ScreenshareController(
     IScreenshareTicketStore store,
-    IOptions<ScreenshareOptions> options, IWebHostEnvironment env,
+    IOptions<ScreenshareOptions> options,
     ILogger<ScreenshareController> logger) : ControllerBase
 {
     private readonly ScreenshareOptions _options = options.Value;
     private const string RedeemCookie = "ss_redeem";
 
     [HttpGet("/screenshare")]
-    public async Task<IActionResult> ViewerPage()
+    public IActionResult ViewerPage()
     {
         var ticketForLog = Request.Query.TryGetValue("ticket", out var tq) && !string.IsNullOrEmpty(tq)
             ? Mask(tq.ToString()) : "(none)";
 
-        // Require interactive sign-in so the opener proves they are the bound hirer. In Development a
-        // configured DevBypassOid short-circuits this so the flow is testable without an app-reg.
-        if (!IsDevBypass())
-        {
-            var auth = await HttpContext.AuthenticateAsync(CookieAuthenticationDefaults.AuthenticationScheme);
-            if (!auth.Succeeded)
-            {
-                logger.LogInformation("[Screenshare] viewer page: sign-in required, challenging OIDC ticket={Ticket}", ticketForLog);
-                // Round-trip back to this exact viewer URL (carries the ticket) after sign-in.
-                var returnUrl = Request.Path + Request.QueryString;
-                return Challenge(
-                    new AuthenticationProperties { RedirectUri = returnUrl },
-                    OpenIdConnectDefaults.AuthenticationScheme);
-            }
-            var openerOid = auth.Principal?.FindFirst("oid")?.Value
-                ?? auth.Principal?.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
-            logger.LogInformation("[Screenshare] viewer page served ticket={Ticket} oid={Oid}", ticketForLog, openerOid ?? "(none)");
-        }
-        else
-        {
-            logger.LogInformation("[Screenshare] viewer page served (dev bypass) ticket={Ticket}", ticketForLog);
-        }
+        logger.LogInformation("[Screenshare] viewer page served ticket={Ticket}", ticketForLog);
 
         // Top-level page (NOT a Teams iframe): deny framing entirely, but still allow the SDK's own
         // nested CDN iframe (frame-src) + scripts. No Teams frame-ancestors / TeamsJS needed anymore.
@@ -78,46 +52,22 @@ public sealed class ScreenshareController(
         return Content(ScreenshareViewerPage.Render(nonce), "text/html");
     }
 
-    [HttpGet("/screenshare/switch-account")]
-    public async Task<IActionResult> SwitchAccount([FromQuery] string? ticket)
-    {
-        var returnUrl = "/screenshare" + (string.IsNullOrEmpty(ticket) ? "" : $"?ticket={Uri.EscapeDataString(ticket)}");
-        if (IsDevBypass())
-        {
-            return Redirect(returnUrl);
-        }
-        // Clear the local cookie so the re-challenge can't silently reuse the wrong account, then force
-        // the Entra account picker so the opener can choose their hirer identity.
-        await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
-        logger.LogInformation("[Screenshare] switch-account requested ticket={Ticket}",
-            string.IsNullOrEmpty(ticket) ? "(none)" : Mask(ticket));
-        var props = new AuthenticationProperties { RedirectUri = returnUrl };
-        props.Items["prompt"] = "select_account";
-        return Challenge(props, OpenIdConnectDefaults.AuthenticationScheme);
-    }
-
     [HttpPost("/api/screenshare/session")]
-    public async Task<IActionResult> Redeem([FromBody] RedeemRequest? body, CancellationToken ct)
+    public IActionResult Redeem([FromBody] RedeemRequest? body)
     {
         if (string.IsNullOrWhiteSpace(body?.Ticket))
         {
             return BadRequest();
         }
 
-        var oid = await ResolveOpenerOidAsync(ct);
-        if (oid is null)
-        {
-            logger.LogWarning("[Screenshare] redeem denied: no opener identity (sign-in unresolved) ticket={Ticket}", Mask(body.Ticket));
-            return Unauthorized();
-        }
-
-        var outcome = store.Redeem(body.Ticket, oid, Request.Cookies[RedeemCookie]);
-        logger.LogInformation("[Screenshare] redeem ticket={Ticket} oid={Oid} success={Ok} reason={Reason}",
-            Mask(body.Ticket), oid, outcome.Success, outcome.Reason);
+        var existingCookie = Request.Cookies[RedeemCookie];
+        var outcome = store.Redeem(body.Ticket, existingCookie);
+        logger.LogInformation("[Screenshare] redeem ticket={Ticket} continuity={Continuity} success={Ok} reason={Reason}",
+            Mask(body.Ticket), existingCookie is not null, outcome.Success, outcome.Reason);
 
         if (!outcome.Success)
         {
-            return outcome.Reason == RedeemFailure.WrongHuman
+            return outcome.Reason == RedeemFailure.WrongViewer
                 ? StatusCode(StatusCodes.Status403Forbidden)
                 : StatusCode(StatusCodes.Status410Gone, new { reason = outcome.Reason.ToString() });
         }
@@ -137,7 +87,7 @@ public sealed class ScreenshareController(
     }
 
     [HttpPost("/api/screenshare/state")]
-    public async Task<IActionResult> State([FromBody] StateRequest? body, CancellationToken ct)
+    public IActionResult State([FromBody] StateRequest? body)
     {
         if (string.IsNullOrWhiteSpace(body?.Ticket))
         {
@@ -150,16 +100,12 @@ public sealed class ScreenshareController(
             return Ok(new StateResponse("ended"));
         }
 
-        var oid = await ResolveOpenerOidAsync(ct);
-        var cookieOk = Request.Cookies.TryGetValue(RedeemCookie, out var c) && c == t.RedeemCookieId;
-        if (oid is null && !cookieOk)
+        var cookieOk = Request.Cookies.TryGetValue(RedeemCookie, out var c)
+            && !string.IsNullOrEmpty(t.RedeemCookieId)
+            && string.Equals(c, t.RedeemCookieId, StringComparison.Ordinal);
+        if (!cookieOk)
         {
-            logger.LogWarning("[Screenshare] state denied: unauthenticated ticket={Ticket}", Mask(body.Ticket));
-            return Unauthorized();
-        }
-        if (oid is not null && !string.Equals(oid, t.HumanOid, StringComparison.OrdinalIgnoreCase) && !cookieOk)
-        {
-            logger.LogWarning("[Screenshare] state denied: opener {Oid} != hirer ticket={Ticket}", oid, Mask(body.Ticket));
+            logger.LogWarning("[Screenshare] state denied: viewer cookie missing or mismatched ticket={Ticket}", Mask(body.Ticket));
             return StatusCode(StatusCodes.Status403Forbidden);
         }
 
@@ -181,13 +127,13 @@ public sealed class ScreenshareController(
                 if (m is ShareStatus.Ended)
                 {
                     var lasted = t.RedeemedAt is { } r ? (int)(DateTimeOffset.UtcNow - r).TotalSeconds : -1;
-                    logger.LogInformation("[Screenshare] view ended ticket={Ticket} oid={Oid} reason={Reason} visibility={Vis} lastedSec={Lasted}",
-                        Mask(body.Ticket), oid ?? "(cookie)", body.Reason ?? "(none)", body.Visibility ?? "(none)", lasted);
+                    logger.LogInformation("[Screenshare] view ended ticket={Ticket} reason={Reason} visibility={Vis} lastedSec={Lasted}",
+                        Mask(body.Ticket), body.Reason ?? "(none)", body.Visibility ?? "(none)", lasted);
                 }
                 else
                 {
-                    logger.LogInformation("[Screenshare] view {Status} ticket={Ticket} oid={Oid} sdk={Sdk}",
-                        m, Mask(body.Ticket), oid ?? "(cookie)", body.SdkStatus);
+                    logger.LogInformation("[Screenshare] view {Status} ticket={Ticket} sdk={Sdk}",
+                        m, Mask(body.Ticket), body.SdkStatus);
                 }
             }
         }
@@ -200,28 +146,6 @@ public sealed class ScreenshareController(
             : "continue";
         return Ok(new StateResponse(directive));
     }
-
-    private async Task<string?> ResolveOpenerOidAsync(CancellationToken ct)
-    {
-        // DEV-ONLY bypass so the flow is testable locally before the app-reg / sign-in exists.
-        if (IsDevBypass())
-        {
-            return _options.DevBypassOid;
-        }
-
-        // The opener authenticated interactively via OIDC; their identity lives in the cookie session.
-        var auth = await HttpContext.AuthenticateAsync(CookieAuthenticationDefaults.AuthenticationScheme);
-        if (!auth.Succeeded || auth.Principal is null)
-        {
-            return null;
-        }
-
-        return auth.Principal.FindFirst("oid")?.Value
-            ?? auth.Principal.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
-    }
-
-    private bool IsDevBypass() =>
-        env.IsDevelopment() && !string.IsNullOrWhiteSpace(_options.DevBypassOid);
 
     private static string Mask(string ticket) => ScreenshareService.MaskTicket(ticket);
 }

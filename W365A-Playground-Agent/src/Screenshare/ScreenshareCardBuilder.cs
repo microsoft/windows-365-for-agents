@@ -11,8 +11,8 @@ namespace Microsoft.W365APlaygroundAgent.Screenshare;
 /// <summary>
 /// Builds the "Watch live" Adaptive Card. Its button is an <c>Action.OpenUrl</c> that opens the
 /// viewer page (a top-level browser page — the agentic surface doesn't support task-module dialogs)
-/// carrying the opaque ticketId. The viewer enforces an interactive Entra sign-in so only the bound
-/// hirer can redeem. Card JSON is built as a JsonObject for deterministic serialization.
+/// carrying the opaque ticketId. The first browser to redeem the short-lived link claims it.
+/// Card JSON is built as a JsonObject for deterministic serialization.
 /// </summary>
 public static class ScreenshareCardBuilder
 {

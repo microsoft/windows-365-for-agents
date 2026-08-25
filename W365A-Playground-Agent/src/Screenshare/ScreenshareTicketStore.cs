@@ -28,7 +28,6 @@ public sealed class ScreenshareTicketStore : IScreenshareTicketStore
             Mode = spec.Mode,
             Scope = spec.Scope,
             ConversationId = spec.ConversationId,
-            HumanOid = spec.HumanOid,
             W365SessionId = spec.W365SessionId,
             CreatedAt = now,
             RedeemByUtc = now + spec.RedeemBy,
@@ -52,7 +51,7 @@ public sealed class ScreenshareTicketStore : IScreenshareTicketStore
     public ScreenshareTicket? Get(string ticketId) =>
         _tickets.TryGetValue(ticketId, out var t) ? t : null;
 
-    public RedeemOutcome Redeem(string ticketId, string openerOid, string? existingCookieId)
+    public RedeemOutcome Redeem(string ticketId, string? existingCookieId)
     {
         if (!_tickets.TryGetValue(ticketId, out var t))
         {
@@ -67,17 +66,11 @@ public sealed class ScreenshareTicketStore : IScreenshareTicketStore
                 return RedeemOutcome.Fail(RedeemFailure.Revoked);
             }
 
-            if (now > t.SessionUntilUtc)
+            if (t.Status == ShareStatus.Expired || now > t.SessionUntilUtc)
             {
                 t.Status = ShareStatus.Expired;
                 return RedeemOutcome.Fail(RedeemFailure.Expired);
             }
-            // The interactive sign-in is the authoritative gate: the opener must be the bound hirer.
-            if (!string.Equals(openerOid, t.HumanOid, StringComparison.OrdinalIgnoreCase))
-            {
-                return RedeemOutcome.Fail(RedeemFailure.WrongHuman);
-            }
-
             if (t.Status == ShareStatus.Offered)
             {
                 if (now > t.RedeemByUtc)
@@ -89,7 +82,13 @@ public sealed class ScreenshareTicketStore : IScreenshareTicketStore
                 t.RedeemedAt = now;
                 t.RedeemCookieId = NewOpaqueId();
             }
-            // else: refresh by the same verified hirer — reuse the existing cookie.
+            else if (string.IsNullOrEmpty(existingCookieId)
+                || string.IsNullOrEmpty(t.RedeemCookieId)
+                || !string.Equals(existingCookieId, t.RedeemCookieId, StringComparison.Ordinal))
+            {
+                return RedeemOutcome.Fail(RedeemFailure.WrongViewer);
+            }
+            // A refresh from the claiming browser reuses the existing continuity cookie.
 
             t.LastHeartbeatAt = now;
             return new RedeemOutcome(true, RedeemFailure.None, t, t.RedeemCookieId);

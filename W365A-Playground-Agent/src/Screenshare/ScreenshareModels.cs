@@ -13,12 +13,12 @@ public enum ShareMode { Interactive, ViewOnly }
 public enum ShareScope { See, SeeControl }
 
 /// <summary>Why a redemption attempt was refused.</summary>
-public enum RedeemFailure { None, NotFound, Expired, WrongHuman, Revoked }
+public enum RedeemFailure { None, NotFound, Expired, WrongViewer, Revoked }
 
 /// <summary>
 /// Server-side record backing one screenshare view. Only <see cref="TicketId"/> ever travels in a
 /// URL; <see cref="ComputerUrl"/> and <see cref="AriToken"/> are secrets returned only via the
-/// same-origin, sign-in-gated redeem endpoint and are never logged.
+/// same-origin, cookie-bound redeem endpoint and are never logged.
 /// </summary>
 public sealed class ScreenshareTicket
 {
@@ -30,7 +30,6 @@ public sealed class ScreenshareTicket
     public ShareScope Scope { get; init; }
 
     public required string ConversationId { get; init; }
-    public required string HumanOid { get; init; }   // the hirer this offer is bound to
     public required string W365SessionId { get; init; }
 
     public DateTimeOffset CreatedAt { get; init; }
@@ -49,7 +48,7 @@ public sealed class ScreenshareTicket
 public sealed record NewTicket(
     string ComputerUrl, string? AriToken, string ViewerUrl,
     ShareMode Mode, ShareScope Scope,
-    string ConversationId, string HumanOid, string W365SessionId,
+    string ConversationId, string W365SessionId,
     TimeSpan RedeemBy, DateTimeOffset SessionUntilUtc,
     DateTimeOffset? AriTokenExpiryUtc = null);
 

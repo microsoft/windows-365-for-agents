@@ -192,8 +192,8 @@ public class PlaygroundAgent : AgentApplication
 
     /// <summary>
     /// Mint-at-offer: called mid-turn (from the orchestrator's offer callback) the moment a NEW Cloud
-    /// PC session starts. Mints the ARI token, creates a hirer-bound ticket, and sends the "Watch live"
-    /// card so the human can watch DURING the work. Best-effort — never breaks the turn.
+    /// PC session starts. Mints the ARI token, creates a first-redeemer ticket, and sends the
+    /// "Watch live" card so a viewer can watch DURING the work. Best-effort — never breaks the turn.
     /// </summary>
     private async Task OfferScreenshareCardAsync(ITurnContext turnContext, string sessionId, string screenShareUrl, string? authHandlerName, CancellationToken cancellationToken)
     {
@@ -206,9 +206,8 @@ public class PlaygroundAgent : AgentApplication
             }
 
             // Tenant allow-list gate (fail-closed): the screenshare feature is served ONLY to allow-listed
-            // tenants — it is not multi-tenant ready yet (hirer resolution + the OIDC sign-in app are
-            // home-tenant scoped). Callers from any other tenant get the normal flow (CUA work
-            // + forwarded screenshots) with NO "Watch live" card. Empty allow-list ⇒ nobody.
+            // tenants. Callers from any other tenant get the normal flow (CUA work + forwarded
+            // screenshots) with NO "Watch live" card. Empty allow-list ⇒ nobody.
             var callerTenant = ResolveCallerTenantId(turnContext);
             if (!IsScreenshareAllowedForTenant(callerTenant))
             {
@@ -224,19 +223,13 @@ public class PlaygroundAgent : AgentApplication
                 return;
             }
 
-            var agentInstanceId = turnContext.Activity?.GetAgenticInstanceId();
-            if (string.IsNullOrEmpty(agentInstanceId))
-            {
-                return;
-            }
-
             Func<string[], CancellationToken, Task<string?>> mintAri = async (scopes, ct) =>
                 // exchangeConnection is null for the agentic ARI token exchange.
                 await UserAuthorization.ExchangeTurnTokenAsync(turnContext, authHandlerName!, exchangeConnection: null!, scopes, ct);
 
             var conversationId = turnContext.Activity?.Conversation?.Id ?? sessionId;
             var ticket = await _screenshareIssuer.CreateOfferAsync(
-                mintAri, agentInstanceId, conversationId, screenShareUrl, sessionId, cancellationToken);
+                mintAri, conversationId, screenShareUrl, sessionId, cancellationToken);
             if (ticket is null)
             {
                 return;

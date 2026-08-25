@@ -6,11 +6,11 @@ namespace Microsoft.W365APlaygroundAgent.Screenshare;
 /// <summary>
 /// Static viewer HTML served by <c>GET /screenshare</c> as a top-level browser page (the agentic
 /// Teams surface can't host task-module dialogs, so the card's Action.OpenUrl opens this page). The
-/// opener is authenticated by an interactive Entra sign-in enforced server-side before this HTML is
-/// served, so the page carries NO secrets: it reads the opaque ticket from the URL, redeems via POST
-/// /api/screenshare/session (the same-origin auth cookie is sent automatically), dynamically loads
-/// the SDK from the server-provided viewerUrl (script tag — no CORS), connects the ScreenShareViewer,
-/// and syncs liveness/teardown via POST /api/screenshare/state.
+/// page reads the opaque ticket from the URL and redeems it via POST /api/screenshare/session. The
+/// first browser to redeem atomically claims the ticket and receives an HttpOnly continuity cookie,
+/// which is sent automatically on later same-origin requests. The page dynamically loads the SDK
+/// from the server-provided viewerUrl, connects the ScreenShareViewer, and syncs liveness/teardown
+/// via POST /api/screenshare/state.
 /// </summary>
 internal static class ScreenshareViewerPage
 {
@@ -77,7 +77,7 @@ internal static class ScreenshareViewerPage
               setControls('idle'); showPanel(text);
             }
 
-            function authHeaders() { return { 'Content-Type': 'application/json' }; } // same-origin cookie is sent automatically
+            function authHeaders() { return { 'Content-Type': 'application/json' }; } // continuity cookie is sent automatically
 
             async function reportState(status, useBeacon, reason) {
               if (!ticket) return;
@@ -122,8 +122,7 @@ internal static class ScreenshareViewerPage
               let session;
               try {
                 const resp = await fetch('/api/screenshare/session', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ ticket }) });
-                if (resp.status === 401) { showPanel('Your sign-in has expired.', 'Sign in again', function () { location.reload(); }); return; }
-                if (resp.status === 403) { showPanel('You are not authorized to view this session — you may be signed in with the wrong account.', 'Sign in with a different account', function () { location.href = '/screenshare/switch-account?ticket=' + encodeURIComponent(ticket); }); return; }
+                if (resp.status === 403) { showPanel('This live link has already been opened in another browser. Go back to Teams and ask the agent to share again.'); return; }
                 if (resp.status === 410) { showPanel('This live link has expired. Go back to Teams and ask the agent to share again.'); return; }
                 if (!resp.ok) { showPanel('Could not start the live view.'); return; }
                 session = await resp.json();

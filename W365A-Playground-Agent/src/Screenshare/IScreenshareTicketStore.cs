@@ -18,11 +18,10 @@ public interface IScreenshareTicketStore
     ScreenshareTicket? Get(string ticketId);
 
     /// <summary>
-    /// Redeem for the authenticated opener. Enforces: exists, not revoked/ended, not past
-    /// SessionUntil, first open within RedeemBy, and <paramref name="openerOid"/> == the ticket's
-    /// HumanOid. Idempotent for the same verified hirer (allows page refresh) until SessionUntil.
+    /// Redeem for the ticket holder. The first successful open within RedeemBy atomically claims
+    /// the ticket and creates a continuity cookie. Later redemptions require that exact cookie.
     /// </summary>
-    RedeemOutcome Redeem(string ticketId, string openerOid, string? existingCookieId);
+    RedeemOutcome Redeem(string ticketId, string? existingCookieId);
 
     /// <summary>Set a lifecycle status (from beacons / orchestrator).</summary>
     void SetStatus(string ticketId, ShareStatus status);
@@ -45,7 +44,7 @@ public interface IScreenshareTicketStore
     /// <summary>
     /// True if <paramref name="w365SessionId"/> has a ticket that is still usable — <c>Offered</c> within
     /// its RedeemBy window, or <c>Redeemed</c>/<c>Live</c>/<c>Controlling</c> within SessionUntil — i.e. a
-    /// "Watch live" card the hirer could still open or is actively viewing.
+    /// "Watch live" card a viewer could still open or is actively viewing.
     /// </summary>
     bool HasRedeemableTicket(string w365SessionId);
 

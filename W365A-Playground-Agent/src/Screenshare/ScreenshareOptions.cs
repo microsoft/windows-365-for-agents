@@ -21,9 +21,6 @@ public sealed class ScreenshareOptions
     /// <summary>Hard cap on a single view's duration (SessionUntil policy max).</summary>
     public int MaxSessionMinutes { get; set; } = 120;
 
-    /// <summary>DEVELOPMENT-ONLY: if set, redeem/state accept this oid without a real sign-in (local testing).</summary>
-    public string? DevBypassOid { get; set; }
-
     /// <summary>Public HTTPS origin of the agent's webapp (e.g. https://{bot-domain}) for the "Watch live" viewer link. Required in prod.</summary>
     public string? PublicBaseUrl { get; set; }
 
