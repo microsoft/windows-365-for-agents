@@ -144,7 +144,7 @@ internal sealed class TurnScopeAccessor : ITurnScopeAccessor
     // Resolve a directory object id (GUID) from a ChannelAccount: prefer AadObjectId; else strip the
     // channel "8:orgid:" prefix off Id and accept only if it parses as a GUID (never stamp a
     // channel-scoped non-directory id as identity).
-    private static string? ResolveDirectoryObjectId(string? aadObjectId, string? channelAccountId)
+    internal static string? ResolveDirectoryObjectId(string? aadObjectId, string? channelAccountId)
     {
         if (!string.IsNullOrEmpty(aadObjectId))
         {

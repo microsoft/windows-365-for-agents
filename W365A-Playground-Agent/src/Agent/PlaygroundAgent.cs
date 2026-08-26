@@ -77,6 +77,7 @@ public class PlaygroundAgent : AgentApplication
     private readonly IMcpToolRegistrationService _toolService;
     private readonly IUserTurnLimiter _turnLimiter;
     private readonly ITurnScopeAccessor _turnScopes;
+    private readonly Agent365ActivityTelemetry _agent365ActivityTelemetry;
     private readonly IScreenshareIssuer _screenshareIssuer;
     private readonly IScreenshareTicketStore _ticketStore;
 
@@ -155,6 +156,7 @@ public class PlaygroundAgent : AgentApplication
         ILogger<PlaygroundAgent> logger,
         IUserTurnLimiter turnLimiter,
         ITurnScopeAccessor turnScopes,
+        Agent365ActivityTelemetry agent365ActivityTelemetry,
         IScreenshareIssuer screenshareIssuer,
         IScreenshareTicketStore ticketStore) : base(options)
     {
@@ -164,6 +166,7 @@ public class PlaygroundAgent : AgentApplication
         _toolService = toolService;
         _turnLimiter = turnLimiter;
         _turnScopes = turnScopes;
+        _agent365ActivityTelemetry = agent365ActivityTelemetry;
         _screenshareIssuer = screenshareIssuer;
         _ticketStore = ticketStore;
 
@@ -354,6 +357,15 @@ public class PlaygroundAgent : AgentApplication
             fromAccount?.Id ?? "(unknown)",
             fromAccount?.AadObjectId ?? "(none)");
 
+        // Activity attribution must be the human caller's Entra OID, never the bot or blueprint.
+        var authHandlerName = turnContext.IsAgenticRequest() ? _agenticAuthHandlerName : _oboAuthHandlerName;
+        using var agent365Turn = await _agent365ActivityTelemetry.BeginTurnAsync(
+            turnContext,
+            UserAuthorization,
+            authHandlerName,
+            turnContext.Activity.Text?.Length ?? 0,
+            cancellationToken).ConfigureAwait(false);
+
         // Per-user turn quota: 100 turns per rolling 24h. Skipped in BEARER_TOKEN dev mode
         // (no real Teams caller in that flow). A blocked user sees a friendly text reply.
         if (!TryGetBearerTokenForDevelopment(out _))
@@ -371,9 +383,11 @@ public class PlaygroundAgent : AgentApplication
             else if (!_turnLimiter.TryConsume(quotaKey, out var turnCount))
             {
                 _logger.LogWarning("TurnLimit: BLOCKED — caller={Caller} count={Count}", quotaKey, turnCount);
+                const string limitMessage = "You've reached the usage limit (100 turns per 24h). Please try again later.";
                 await turnContext.SendActivityAsync(
-                    MessageFactory.Text("You've reached the usage limit (100 turns per 24h). Please try again later."),
+                    MessageFactory.Text(limitMessage),
                     cancellationToken);
+                agent365Turn?.RecordOutput(1, limitMessage.Length);
                 return;
             }
             else
@@ -381,9 +395,6 @@ public class PlaygroundAgent : AgentApplication
                 _logger.LogDebug("TurnLimit: {Count}/100 (24h) for caller={Caller}", turnCount, quotaKey);
             }
         }
-
-        // Agentic requests use the agentic auth handler; everything else (Playground, WebChat) uses OBO.
-        var authHandlerName = turnContext.IsAgenticRequest() ? _agenticAuthHandlerName : _oboAuthHandlerName;
 
         // Teams streaming allows only ONE uninterrupted stream per chat, but CUA turns interleave separate
         // messages (screenshots, the screenshare card, typing pings) and run long — which makes Teams stop
@@ -453,11 +464,13 @@ Func<CancellationToken, Task<ToolReacquireResult>> reacquireTools = async ct =>
     var fresh = await GetToolsAsync(turnContext, turnState, authHandlerName, forceRefresh: true);
     return new ToolReacquireResult(fresh, _lastForceRefreshTokenRefreshed);
 };
-await _orchestrator.RunAsync(conversationKey, userText, GetAgentInstructions(displayName), tools, reacquireTools, turnContext,
+var outputSummary = await _orchestrator.RunAsync(conversationKey, userText, GetAgentInstructions(displayName), tools, reacquireTools, turnContext,
+    agent365Turn,
     // Mint-at-offer, fired MID-TURN the moment a new Cloud PC session starts, so the human can watch
     // DURING the work (not only at end-of-turn). Mints the ARI token in this proven agentic turn.
     (sessionId, screenShareUrl, ct) => OfferScreenshareCardAsync(turnContext, sessionId, screenShareUrl, authHandlerName, ct),
     cancellationToken);
+agent365Turn?.RecordOutput(outputSummary.MessageCount, outputSummary.TextLength);
             }
             finally
             {
@@ -479,11 +492,13 @@ await _orchestrator.RunAsync(conversationKey, userText, GetAgentInstructions(dis
         }
         catch (OperationCanceledException)
         {
+            agent365Turn?.RecordCancellation();
             turn.SetError("canceled");
             throw;
         }
         catch (Exception ex)
         {
+            agent365Turn?.RecordFailure(ex);
             turn.SetError(ex.GetType().Name);
             throw;
         }

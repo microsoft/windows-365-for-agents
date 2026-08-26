@@ -14,6 +14,7 @@ using Microsoft.Agents.Builder;
 using Microsoft.Agents.Core.Models;
 using Microsoft.Extensions.AI;
 using Microsoft.W365APlaygroundAgent.Screenshare;
+using Microsoft.W365APlaygroundAgent.Telemetry;
 using Microsoft.W365APlaygroundAgent.Telemetry.AgentEnrichment;
 
 using ModelContextProtocol.Client;
@@ -23,6 +24,8 @@ namespace Microsoft.W365APlaygroundAgent.ComputerUse;
 
 /// <summary>Result of a forced MCP tool re-enumeration: fresh tools plus whether a new token was minted (Signal 2).</summary>
 public sealed record ToolReacquireResult(IList<AITool> Tools, bool? TokenRefreshed);
+
+public sealed record AgentTurnOutputSummary(int MessageCount, int TextLength);
 
 /// <summary>
 /// Stateless Responses API orchestrator that manages the agentic tool-call loop for each conversation.
@@ -272,7 +275,7 @@ public sealed class ResponsesOrchestrator
 
     // Result of a single function-tool invocation. Mcp401 signals the caller to re-enumerate
     // tools (fresh token) and retry; no paired output is appended yet in that case.
-    private enum ToolCallOutcome { Completed, Mcp401 }
+    private enum ToolCallOutcome { CompletedSuccess, CompletedFailure, Mcp401 }
 
     // Default media type when a W365 image content block omits the mimeType field. Per
     // docs/mcp-tools.md (take_screenshot, zoom_region) the server returns base64 PNG.
@@ -318,13 +321,14 @@ public sealed class ResponsesOrchestrator
     /// and repeats until the model returns a final message with no further tool calls.
     /// Streams text chunks back to the user via <see cref="ITurnContext.StreamingResponse"/> as they arrive.
     /// </summary>
-    public async Task RunAsync(
+    public async Task<AgentTurnOutputSummary> RunAsync(
         string conversationKey,
         string userMessage,
         string instructions,
         IList<AITool> tools,
         Func<CancellationToken, Task<ToolReacquireResult>> reacquireTools,
         ITurnContext turnContext,
+        Agent365TurnOperation? agent365Turn,
         Func<string, string, CancellationToken, Task>? offerScreenshareAsync,
         CancellationToken cancellationToken)
     {
@@ -434,6 +438,8 @@ public sealed class ResponsesOrchestrator
         // long, which makes Teams stop the stream and drop the answer. Send model text as normal messages
         // instead; keep true streaming for non-agentic (WebChat/Playground).
         var streamTextToClient = !turnContext.IsAgenticRequest();
+        var outputMessageCount = 0;
+        var outputTextLength = 0;
 
         // The agent loop — the canonical pattern: call model → stream text → execute any tool
         // calls the model requested → repeat until the model returns a message with no further
@@ -451,7 +457,7 @@ public sealed class ResponsesOrchestrator
                 state.PendingInitialScreenshot = null;
             }
 
-            var response = await CallModelAsync(history, instructions, toolDefs, cancellationToken);
+            var response = await CallModelAsync(history, instructions, toolDefs, agent365Turn, cancellationToken);
 
             if (response.Usage is { } usage)
             {
@@ -484,6 +490,8 @@ public sealed class ResponsesOrchestrator
                     var text = ExtractMessageText(item);
                     if (!string.IsNullOrEmpty(text))
                     {
+                        outputMessageCount++;
+                        outputTextLength += text.Length;
                         if (streamTextToClient)
                         {
                             turnContext.StreamingResponse.QueueTextChunk(text);
@@ -526,12 +534,28 @@ public sealed class ResponsesOrchestrator
 
                 if (!toolsByName.TryGetValue(name, out var func))
                 {
+                    using var unknownToolTelemetry = agent365Turn?.StartTool(
+                        "unknown_tool",
+                        callId,
+                        argumentsJson,
+                        "Unknown",
+                        "unknown");
                     _logger.LogWarning("Tool '{Name}' not found.", name);
                     history.Add(MakeFunctionCallOutput(callId, $"Tool '{name}' not found."));
+                    unknownToolTelemetry?.Complete(false, 0, false, null, "tool_not_found");
                     continue;
                 }
 
-                var outcome = await HandleToolCallAsync(state, history, func, callId, argumentsJson, turnContext, cancellationToken, isFinalAttempt: _max401RetriesPerCall <= 0);
+                var (toolServer, toolShortName, toolKind) = ClassifyTool(func.Name);
+                using var toolTelemetry = agent365Turn?.StartTool(
+                    toolShortName,
+                    callId,
+                    argumentsJson,
+                    toolKind.ToString(),
+                    toolServer);
+                try
+                {
+                    var outcome = await HandleToolCallAsync(state, history, func, callId, argumentsJson, turnContext, agent365Turn, cancellationToken, isFinalAttempt: _max401RetriesPerCall <= 0);
 
                 // Reactive MCP 401 recovery: re-enumerate tools (fresh transport token) and retry,
                 // bounded by _max401RetriesPerCall (per call) AND _max401ReacquiresPerTurn (per turn).
@@ -541,15 +565,17 @@ public sealed class ResponsesOrchestrator
 lastReacquireTokenRefreshed = null; // Signal 2 applies only to reacquires attempted for this tool call
 bool entered401 = outcome == ToolCallOutcome.Mcp401;
 bool recovered = false;
+int retryCount = 0;
                 for (int retry = 1; outcome == ToolCallOutcome.Mcp401 && retry <= _max401RetriesPerCall; retry++)
                 {
+                    retryCount++;
                     var isFinal = retry >= _max401RetriesPerCall;
                     try
                     {
                         if (await TryReacquireToolsAsync().ConfigureAwait(false)
                             && toolsByName.TryGetValue(name, out var freshFunc))
                         {
-                            outcome = await HandleToolCallAsync(state, history, freshFunc, callId, argumentsJson, turnContext, cancellationToken, isFinalAttempt: isFinal);
+                            outcome = await HandleToolCallAsync(state, history, freshFunc, callId, argumentsJson, turnContext, agent365Turn, cancellationToken, isFinalAttempt: isFinal);
                             if (outcome != ToolCallOutcome.Mcp401)
                             {
                                 recovered = true;
@@ -560,8 +586,12 @@ bool recovered = false;
                             // Reacquire budget exhausted or tool gone post-refresh — emit the single
                             // paired output and stop.
                             history.Add(MakeFunctionCallOutput(callId, "Tool error: MCP authorization expired (401) and could not be refreshed this turn."));
-                            outcome = ToolCallOutcome.Completed;
+                            outcome = ToolCallOutcome.CompletedFailure;
                         }
+                    }
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                    {
+                        throw;
                     }
                     catch (Exception ex)
                     {
@@ -569,7 +599,7 @@ bool recovered = false;
                         // call_id is satisfied and history is not poisoned with an orphan function_call.
                         _logger.LogWarning(ex, "MCP 401 recovery: tool re-acquisition failed for '{Name}'; emitting paired error output.", name);
                         history.Add(MakeFunctionCallOutput(callId, "Tool error: MCP authorization expired (401) and token refresh failed this turn."));
-                        outcome = ToolCallOutcome.Completed;
+                        outcome = ToolCallOutcome.CompletedFailure;
                     }
                 }
 
@@ -587,12 +617,36 @@ bool recovered = false;
                     _logger.LogWarning("MCP401Classification conv={Key} path=function-tool tool={Tool} outcome={Label} kind={Kind} (signal1=retry-{Retry}, signal2=tokenRefreshed={Refreshed}).",
                         conversationKey, name, label, kind, recovered ? "success" : "failed", lastReacquireTokenRefreshed?.ToString() ?? "unknown");
                 }
+
+                var toolSucceeded = outcome == ToolCallOutcome.CompletedSuccess;
+                var toolOutcome = toolSucceeded
+                    ? "success"
+                    : outcome == ToolCallOutcome.Mcp401
+                        ? "authorization_failed"
+                        : "tool_failed";
+                toolTelemetry?.Complete(
+                    toolSucceeded,
+                    retryCount,
+                    recovered,
+                    lastReacquireTokenRefreshed,
+                    toolOutcome);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    toolTelemetry?.RecordCancellation();
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    toolTelemetry?.RecordFailure(ex, "tool_orchestration_failed");
+                    throw;
+                }
             }
 
             // Process computer_call items serially (UI state is sequential).
             foreach (var call in computerCalls)
             {
-                await HandleComputerCallAsync(state, history, call, turnContext, cancellationToken);
+                await HandleComputerCallAsync(state, history, call, turnContext, agent365Turn, cancellationToken);
             }
 
             // Aggressive auto-(re)offer of the "Watch live" card: if this iteration did any CUA work
@@ -624,6 +678,8 @@ bool recovered = false;
                 }
             }
         }
+
+        return new AgentTurnOutputSummary(outputMessageCount, outputTextLength);
     }
 
     /// <summary>
@@ -695,6 +751,7 @@ bool recovered = false;
         string callId,
         string argumentsJson,
         ITurnContext turnContext,
+        Agent365TurnOperation? agent365Turn,
         CancellationToken cancellationToken,
         bool isFinalAttempt)
     {
@@ -728,7 +785,7 @@ bool recovered = false;
             {
                 _logger.LogWarning("Tool '{Name}' BLOCKED by session validator (callId={CallId}): {Err}", func.Name, callId, switchErr);
                 history.Add(MakeFunctionCallOutput(callId, switchErr!));
-                return ToolCallOutcome.Completed;
+                return ToolCallOutcome.CompletedFailure;
             }
         }
 
@@ -747,6 +804,10 @@ bool recovered = false;
         try
         {
             result = await func.InvokeAsync(new AIFunctionArguments(args), cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -773,14 +834,14 @@ bool recovered = false;
             _logger.LogWarning(ex, "Tool '{Name}' invocation failed.", func.Name);
             RecordToolTelemetry(success: false);
             history.Add(MakeFunctionCallOutput(callId, $"Tool error: {ex.Message}"));
-            return ToolCallOutcome.Completed;
+            return ToolCallOutcome.CompletedFailure;
         }
 
         RecordToolTelemetry(success: true);
 
         // W365 lifecycle post-processing: track/remove sessions in the conversation's
         // multi-slot session set based on which lifecycle tool just ran.
-        await UpdateW365SessionFromResult(state, func.Name, args, result, cancellationToken);
+        await UpdateW365SessionFromResult(state, func.Name, args, result, agent365Turn, cancellationToken);
 
         _turnScopes.CurrentTurn?.SetSessionId(state.W365SessionId);
         _turnScopes.CurrentTurn?.SetSessionCount(state.W365SessionIds.Count);
@@ -824,7 +885,7 @@ bool recovered = false;
             history.Add(MakeFunctionCallOutput(callId, resultStr));
         }
 
-        return ToolCallOutcome.Completed;
+        return ToolCallOutcome.CompletedSuccess;
     }
 
     /// <summary>
@@ -841,6 +902,7 @@ bool recovered = false;
         List<JsonElement> history,
         JsonElement call,
         ITurnContext turnContext,
+        Agent365TurnOperation? agent365Turn,
         CancellationToken cancellationToken)
     {
         var callId = call.GetProperty("call_id").GetString()!;
@@ -850,12 +912,19 @@ bool recovered = false;
         // input_text user message so the model knows to call StartSession on its next turn.
         if (string.IsNullOrEmpty(state.W365SessionId) || state.W365McpClient is null)
         {
+            using var unavailableTelemetry = agent365Turn?.StartTool(
+                "computer_call",
+                callId,
+                call.GetRawText(),
+                ToolKind.CuaDesktopControl.ToString(),
+                W365ComputerUseServerName);
             _logger.LogWarning(
                 "HandleComputerCallAsync (callId={CallId}): no active W365 session — emitting placeholder screenshot and corrective hint.",
                 callId);
             history.Add(MakeComputerCallOutput(callId, PlaceholderPngBase64));
             history.Add(MakeUserTextMessage(
                 "No active W365 session. Call mcp_W365ComputerUse_StartSession first, then retry the desktop action."));
+            unavailableTelemetry?.Complete(false, 0, false, null, "session_unavailable");
             return;
         }
 
@@ -880,8 +949,15 @@ bool recovered = false;
 
         if (actionList.Count == 0)
         {
+            using var missingActionTelemetry = agent365Turn?.StartTool(
+                "computer_call",
+                callId,
+                call.GetRawText(),
+                ToolKind.CuaDesktopControl.ToString(),
+                W365ComputerUseServerName);
             _logger.LogWarning("HandleComputerCallAsync (callId={CallId}): no action/actions field — emitting placeholder.", callId);
             history.Add(MakeComputerCallOutput(callId, PlaceholderPngBase64));
+            missingActionTelemetry?.Complete(false, 0, false, null, "action_missing");
             return;
         }
 
@@ -889,8 +965,10 @@ bool recovered = false;
         string finalScreenshotMime = "image/png";
         bool lastActionWasScreenshot = false;
 
+        var actionIndex = 0;
         foreach (var action in actionList)
         {
+            var actionOperationId = $"{callId}:{actionIndex++}";
             var actionType = action.TryGetProperty("type", out var atEl) ? atEl.GetString() ?? "" : "";
             _logger.LogInformation(
                 "computer_call (callId={CallId}) action='{ActionType}' sessionId={SessionId}",
@@ -901,6 +979,12 @@ bool recovered = false;
             // paired computer_call_output below.
             if (string.Equals(actionType, "screenshot", StringComparison.OrdinalIgnoreCase))
             {
+                using var screenshotTelemetry = agent365Turn?.StartTool(
+                    "take_screenshot",
+                    actionOperationId,
+                    "{}",
+                    ToolKind.CuaDesktopControl.ToString(),
+                    W365ComputerUseServerName);
                 var ssStart = System.Diagnostics.Stopwatch.GetTimestamp();
                 try
                 {
@@ -910,9 +994,21 @@ bool recovered = false;
                     lastActionWasScreenshot = true;
                     _turnScopes.CurrentTurn?.RecordToolCall(W365ComputerUseServerName, "take_screenshot", ToolKind.CuaDesktopControl,
                         success: true, System.Diagnostics.Stopwatch.GetElapsedTime(ssStart).TotalMilliseconds);
+                    screenshotTelemetry?.Complete(
+                        finalScreenshotB64 is not null,
+                        0,
+                        false,
+                        null,
+                        finalScreenshotB64 is not null ? "success" : "screenshot_missing");
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    screenshotTelemetry?.RecordCancellation();
+                    throw;
                 }
                 catch (Exception ex)
                 {
+                    screenshotTelemetry?.RecordFailure(ex, "screenshot_failed");
                     _turnScopes.CurrentTurn?.RecordToolCall(W365ComputerUseServerName, "take_screenshot", ToolKind.CuaDesktopControl,
                         success: false, System.Diagnostics.Stopwatch.GetElapsedTime(ssStart).TotalMilliseconds);
                     _logger.LogWarning(ex,
@@ -924,6 +1020,7 @@ bool recovered = false;
             // Map to W365 MCP tool name + args. Skip null-returning mappings (e.g. back/forward
             // mouse buttons) — log + treat as no-op so we still emit a paired output below.
             (string ToolName, Dictionary<string, object?> Args)? mapped;
+            var mappingFailed = false;
             try
             {
                 mapped = MapActionToMcpTool(actionType, action, state.W365SessionId);
@@ -933,11 +1030,34 @@ bool recovered = false;
                 _logger.LogWarning(ex,
                     "computer_call action '{ActionType}' (callId={CallId}) could not be mapped to a W365 tool; skipping.",
                     actionType, callId);
+                mappingFailed = true;
                 mapped = null;
             }
-            if (mapped is null) { lastActionWasScreenshot = false; continue; }
+            if (mapped is null)
+            {
+                using var unsupportedTelemetry = agent365Turn?.StartTool(
+                    "computer.unsupported",
+                    actionOperationId,
+                    action.GetRawText(),
+                    ToolKind.CuaDesktopControl.ToString(),
+                    W365ComputerUseServerName);
+                unsupportedTelemetry?.Complete(
+                    false,
+                    0,
+                    false,
+                    null,
+                    mappingFailed ? "action_mapping_failed" : "action_unsupported");
+                lastActionWasScreenshot = false;
+                continue;
+            }
 
             var (toolName, args) = mapped.Value;
+            using var actionTelemetry = agent365Turn?.StartTool(
+                toolName,
+                actionOperationId,
+                action.GetRawText(),
+                ToolKind.CuaDesktopControl.ToString(),
+                W365ComputerUseServerName);
             var actStart = System.Diagnostics.Stopwatch.GetTimestamp();
             try
             {
@@ -949,9 +1069,16 @@ bool recovered = false;
                 lastActionWasScreenshot = false;
                 _turnScopes.CurrentTurn?.RecordToolCall(W365ComputerUseServerName, toolName, ToolKind.CuaDesktopControl,
                     success: true, System.Diagnostics.Stopwatch.GetElapsedTime(actStart).TotalMilliseconds);
+                actionTelemetry?.Complete(true, 0, false, null, "success");
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                actionTelemetry?.RecordCancellation();
+                throw;
             }
             catch (Exception ex)
             {
+                actionTelemetry?.RecordFailure(ex, "computer_action_failed");
                 _turnScopes.CurrentTurn?.RecordToolCall(W365ComputerUseServerName, toolName, ToolKind.CuaDesktopControl,
                     success: false, System.Diagnostics.Stopwatch.GetElapsedTime(actStart).TotalMilliseconds);
                 TryHandleMcp401(ex, state);
@@ -967,6 +1094,12 @@ bool recovered = false;
         // screenshot (in which case finalScreenshotB64 is already populated).
         if (!lastActionWasScreenshot)
         {
+            using var postScreenshotTelemetry = agent365Turn?.StartTool(
+                "take_screenshot",
+                $"{callId}:post-action-screenshot",
+                "{}",
+                ToolKind.CuaDesktopControl.ToString(),
+                W365ComputerUseServerName);
             try
             {
                 var ss = await CaptureScreenshotAsync(state, cancellationToken).ConfigureAwait(false);
@@ -975,9 +1108,21 @@ bool recovered = false;
                     finalScreenshotB64 = ss.Value.Base64;
                     finalScreenshotMime = ss.Value.MimeType;
                 }
+                postScreenshotTelemetry?.Complete(
+                    ss is not null,
+                    0,
+                    false,
+                    null,
+                    ss is not null ? "success" : "screenshot_missing");
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                postScreenshotTelemetry?.RecordCancellation();
+                throw;
             }
             catch (Exception ex)
             {
+                postScreenshotTelemetry?.RecordFailure(ex, "screenshot_failed");
                 _logger.LogWarning(ex,
                     "Post-action screenshot failed (callId={CallId}); pairing with placeholder.", callId);
             }
@@ -1193,6 +1338,7 @@ bool recovered = false;
         IList<JsonElement> input,
         string instructions,
         IList<JsonElement> tools,
+        Agent365TurnOperation? agent365Turn,
         CancellationToken cancellationToken)
     {
         var requestBody = new
@@ -1207,41 +1353,68 @@ bool recovered = false;
         var json = JsonSerializer.Serialize(requestBody, JsonOptions);
         _logger.LogDebug("Responses API request: {Chars} chars, {InputItems} input items", json.Length, input.Count);
 
+        using var inferenceTelemetry = agent365Turn?.StartInference(_model, input.Count, json.Length);
         const int maxAttempts = 4;
-        for (int attempt = 1; attempt <= maxAttempts; attempt++)
+        var retryCount = 0;
+        try
         {
-            var http = _httpClientFactory.CreateClient("WebClient");
-            using var request = new HttpRequestMessage(HttpMethod.Post, _responsesUrl);
-            request.Headers.Add("api-key", _apiKey);
-            request.Content = new StringContent(json, Encoding.UTF8, "application/json");
-
-            using var httpResponse = await http.SendAsync(request, cancellationToken);
-            var responseJson = await httpResponse.Content.ReadAsStringAsync(cancellationToken);
-
-            if (httpResponse.IsSuccessStatusCode)
+            for (int attempt = 1; attempt <= maxAttempts; attempt++)
             {
-                var parsed = JsonSerializer.Deserialize<ResponsesResponse>(responseJson, JsonOptions)
-                    ?? throw new InvalidOperationException("Null Responses API response.");
-                _logger.LogDebug("Responses API OK: {OutputItems} output items", parsed.Output.Count);
-                return parsed;
+                var http = _httpClientFactory.CreateClient("WebClient");
+                using var request = new HttpRequestMessage(HttpMethod.Post, _responsesUrl);
+                request.Headers.Add("api-key", _apiKey);
+                request.Content = new StringContent(json, Encoding.UTF8, "application/json");
+
+                using var httpResponse = await http.SendAsync(request, cancellationToken);
+                var responseJson = await httpResponse.Content.ReadAsStringAsync(cancellationToken);
+
+                if (httpResponse.IsSuccessStatusCode)
+                {
+                    var parsed = JsonSerializer.Deserialize<ResponsesResponse>(responseJson, JsonOptions)
+                        ?? throw new InvalidOperationException("Null Responses API response.");
+                    var outputTextLength = parsed.Output.Sum(item => ExtractMessageText(item).Length);
+                    inferenceTelemetry?.Complete(
+                        parsed.Id,
+                        parsed.Status ?? "completed",
+                        parsed.Usage?.InputTokens ?? 0,
+                        parsed.Usage?.OutputTokens ?? 0,
+                        parsed.Usage?.InputTokensDetails?.CachedTokens ?? 0,
+                        parsed.Usage?.OutputTokensDetails?.ReasoningTokens ?? 0,
+                        parsed.Output.Count,
+                        outputTextLength,
+                        retryCount);
+                    _logger.LogDebug("Responses API OK: {OutputItems} output items", parsed.Output.Count);
+                    return parsed;
+                }
+
+                if ((int)httpResponse.StatusCode == 429 && attempt < maxAttempts)
+                {
+                    retryCount++;
+                    var retryAfterSecs = httpResponse.Headers.RetryAfter?.Delta?.TotalSeconds
+                                         ?? Math.Pow(2, attempt); // fallback: 2s, 4s, 8s
+                    _logger.LogWarning(
+                        "Responses API 429 rate-limited. Retrying in {Delay:F0}s (attempt {Attempt}/{Max}).",
+                        retryAfterSecs, attempt, maxAttempts);
+                    await Task.Delay(TimeSpan.FromSeconds(retryAfterSecs), cancellationToken);
+                    continue;
+                }
+
+                _logger.LogError("Responses API {Status}: {Body}", httpResponse.StatusCode, responseJson);
+                throw new HttpRequestException($"Responses API {httpResponse.StatusCode}: {responseJson}");
             }
 
-            if ((int)httpResponse.StatusCode == 429 && attempt < maxAttempts)
-            {
-                var retryAfterSecs = httpResponse.Headers.RetryAfter?.Delta?.TotalSeconds
-                                     ?? Math.Pow(2, attempt); // fallback: 2s, 4s, 8s
-                _logger.LogWarning(
-                    "Responses API 429 rate-limited. Retrying in {Delay:F0}s (attempt {Attempt}/{Max}).",
-                    retryAfterSecs, attempt, maxAttempts);
-                await Task.Delay(TimeSpan.FromSeconds(retryAfterSecs), cancellationToken);
-                continue;
-            }
-
-            _logger.LogError("Responses API {Status}: {Body}", httpResponse.StatusCode, responseJson);
-            throw new HttpRequestException($"Responses API {httpResponse.StatusCode}: {responseJson}");
+            throw new InvalidOperationException("Responses API retry loop exited unexpectedly.");
         }
-
-        throw new InvalidOperationException("Responses API retry loop exited unexpectedly.");
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            inferenceTelemetry?.RecordCancellation();
+            throw;
+        }
+        catch (Exception ex)
+        {
+            inferenceTelemetry?.RecordFailure(ex, retryCount);
+            throw;
+        }
     }
 
     /// <summary>
@@ -1729,6 +1902,7 @@ bool recovered = false;
         string toolName,
         IDictionary<string, object?> args,
         object? result,
+        Agent365TurnOperation? agent365Turn,
         CancellationToken cancellationToken)
     {
         if (string.Equals(toolName, W365StartSessionToolName, StringComparison.OrdinalIgnoreCase))
@@ -1787,6 +1961,12 @@ bool recovered = false;
                 // visual context. Without this, the model would typically burn its first
                 // computer_call just doing a screenshot. Best-effort: log + swallow on failure
                 // (lifecycle is still healthy without this).
+                using var initialScreenshotTelemetry = agent365Turn?.StartTool(
+                    "take_screenshot",
+                    $"initial-screenshot:{sessionId}",
+                    "{}",
+                    ToolKind.CuaDesktopControl.ToString(),
+                    W365ComputerUseServerName);
                 try
                 {
                     var initial = await CaptureScreenshotAsync(state, cancellationToken).ConfigureAwait(false);
@@ -1800,9 +1980,21 @@ bool recovered = false;
                         // state for RunAsync to consume on its next iteration.
                         state.PendingInitialScreenshot = (init.Base64, init.MimeType);
                     }
+                    initialScreenshotTelemetry?.Complete(
+                        initial is not null,
+                        0,
+                        false,
+                        null,
+                        initial is not null ? "success" : "screenshot_missing");
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    initialScreenshotTelemetry?.RecordCancellation();
+                    throw;
                 }
                 catch (Exception ex)
                 {
+                    initialScreenshotTelemetry?.RecordFailure(ex, "screenshot_failed");
                     _logger.LogWarning(ex, "Initial post-StartSession screenshot failed; continuing without visual seed.");
                 }
             }
@@ -2155,6 +2347,7 @@ bool recovered = false;
         [property: JsonPropertyName("id")] string Id,
         [property: JsonPropertyName("output")] List<JsonElement> Output,
         [property: JsonPropertyName("model")] string? Model = null,
+        [property: JsonPropertyName("status")] string? Status = null,
         [property: JsonPropertyName("usage")] ResponsesUsage? Usage = null);
 
     /// <summary>Token usage reported by the Responses API on each (non-streaming) call.</summary>
