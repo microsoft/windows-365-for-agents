@@ -83,7 +83,14 @@ list:
 
 ## Set up
 
-Five steps. Steps 1–4 are A365 (linked out); step 5 is Windows 365.
+Six steps. Steps 1–5 are blueprint and identity setup (mostly A365, linked out);
+step 6 is Windows 365.
+
+> **Do steps 2, 3 and 4 together, before you consent.** Computer-Use (Computer-Do)
+> and screen sharing (Computer-See) are declared on the *same* blueprint but
+> through *different* permission paths. Declaring both up front means a single
+> consent pass covers them. If you skip step 4 now, adding a human viewer later
+> requires re-publishing the blueprint and running consent again.
 
 ### 1. Publish your agent blueprint in Entra
 
@@ -124,10 +131,98 @@ for discovery, manifest structure, and the full CLI reference.
 > published examples. If a flag is rejected, run `a365 develop add-mcp-servers -h`
 > and use the usage your installed CLI version prints.
 
-### 3. Grant admin consent
+### 3. Add screen sharing (Computer-See) permissions to the blueprint
 
-Adding a server to the manifest does **not** grant permissions. A Global
-Administrator applies them to the blueprint:
+Do this now, as part of blueprint setup, even if you don't plan to add a human
+viewer on day one. Screen sharing does **not** go through the ATG and is **not**
+covered by the MCP server permissions in step 2: it is a separate set of
+delegated scopes on the Windows 365 Agents Runtime Interface (ARI) resource.
+Declaring them here means the consent pass in step 4 covers both paths and you
+never have to re-publish the blueprint to turn screen sharing on.
+
+Declare the ARI scopes on the agent identity blueprint:
+
+```powershell
+a365 setup permissions custom `
+  --resource-app-id 90ecec28-f5a6-42b3-9bde-dae1ca98f8b5 `
+  --scopes "Computer.See,Computer.Control"
+```
+
+`Computer.See` grants view-only watching; `Computer.Control` additionally allows
+a human to take mouse and keyboard control. Declare both unless you are certain
+your integration is view-only.
+
+The expected end state has three parts:
+
+1. The blueprint declares `Computer.See` and `Computer.Control` for
+   W365Agents-Production.
+2. The blueprint service principal has an `AllPrincipals` OAuth grant for those
+   scopes.
+3. W365Agents-Production appears in the blueprint's `inheritablePermissions`
+   collection with scope inheritance enabled.
+
+Agent instances inherit ARI permissions from the blueprint. Don't create
+duplicate principal-scoped grants on each instance.
+
+Two configuration notes:
+
+- `inheritableScopes.kind=allAllowed` means all ARI scopes already granted to the
+  blueprint are inheritable. It does not grant every scope exposed by ARI.
+- Because this integration uses delegated scopes only, set
+  `inheritableRoles.@odata.type=#microsoft.graph.noRoles` and
+  `inheritableRoles.kind=none` for a valid least-privileged configuration.
+
+Verify:
+
+```powershell
+a365 query-entra blueprint-scopes
+a365 query-entra inheritance
+```
+
+#### If inheritance is missing
+
+Some CLI versions complete the permission declaration but stop before adding
+inheritance. If the blueprint OAuth grant already exists and only the inheritance
+entry is missing, add it through Microsoft Graph:
+
+```powershell
+Connect-MgGraph `
+  -TenantId "<tenant-id>" `
+  -Scopes "AgentIdentityBlueprint.ReadWrite.All"
+
+$uri = "https://graph.microsoft.com/v1.0/applications/" +
+       "microsoft.graph.agentIdentityBlueprint/<blueprint-app-id>/" +
+       "inheritablePermissions"
+
+$body = @{
+    resourceAppId = "90ecec28-f5a6-42b3-9bde-dae1ca98f8b5"
+    inheritableScopes = @{
+        "@odata.type" = "#microsoft.graph.allAllowedScopes"
+        kind = "allAllowed"
+    }
+    inheritableRoles = @{
+        "@odata.type" = "#microsoft.graph.noRoles"
+        kind = "none"
+    }
+} | ConvertTo-Json -Depth 5
+
+Invoke-MgGraphRequest `
+  -Method POST `
+  -Uri $uri `
+  -Body $body `
+  -ContentType "application/json"
+```
+
+Use `POST` only when no entry exists for the ARI resource. If one already exists,
+use the resource-specific URL with `PATCH`.
+
+Runtime details, the SDK API, and the browser-side integration are in
+[Screen Sharing](./screen-sharing.md).
+
+### 4. Grant admin consent
+
+Adding a server to the manifest and declaring ARI scopes does **not** grant
+permissions. A Global Administrator applies them to the blueprint:
 
 - **First-time setup:** `a365 setup all` (includes the MCP permissions step).
 - **Blueprint already exists:** `a365 setup permissions mcp`.
@@ -142,7 +237,12 @@ The MCP path uses two independent permission layers:
 - Each MCP server in `ToolingManifest.json` with `Tools.ListInvoke.All` for
   tool listing and invocation.
 
-Verify both the grants and their inheritance:
+The screen-share scopes from step 3 (`Computer.See`, `Computer.Control` on the
+ARI resource) are a **third, separate** layer. Consent covers whatever is
+declared at the time it runs, so confirm all three are present before you
+consider setup complete.
+
+Verify the grants and their inheritance:
 
 ```powershell
 a365 query-entra blueprint-scopes
@@ -154,7 +254,7 @@ tokens succeed, repair `McpServersMetadata.Read.All`; the per-server permissions
 are already healthy. Agent identities should inherit these permissions from the
 blueprint rather than receive duplicate direct grants.
 
-### 4. Create an agent user
+### 5. Create an agent user
 
 Your agent acts as a dedicated **agent user** at runtime — an identity separate
 from any human user. This is the identity that will be assigned to a Cloud PC
@@ -167,13 +267,13 @@ A365 CLI and Microsoft Entra — see
 and [Agent user identity](https://learn.microsoft.com/en-us/entra/agent-id/agent-users).
 
 Note the agent user's identity (its UPN or object ID). You need it to assign the
-agent to a pool in step 5.
+agent to a pool in step 6.
 
 > **Why this matters for Windows 365:** a Cloud PC agent pool grants access to
 > *specific agents*. An agent that has no agent user, or whose agent user is not
 > assigned to a pool, cannot check out a Cloud PC even with a valid token.
 
-### 5. Provision a Cloud PC agent pool and assign your agent
+### 6. Provision a Cloud PC agent pool and assign your agent
 
 Pool management is Windows 365 territory and is fully self-service — not the ATG.
 Stand up a pool your agent can draw from using either path:
@@ -182,7 +282,7 @@ Stand up a pool your agent can draw from using either path:
 - **Microsoft Graph (Cloud PC APIs)** — programmatic pool management.
 
 **Assign your agent user to the pool.** When you create the provisioning policy,
-the **Agents** page is where you add the agent user from step 4. Only assigned
+the **Agents** page is where you add the agent user from step 5. Only assigned
 agents can check out a Cloud PC from that pool. You can add or change agent
 assignments later by editing the policy — that change applies immediately and
 does not require reprovisioning.
@@ -261,8 +361,24 @@ Computer-Use tools; see [MCP Tools](./mcp-tools.md) for the full catalog and
 ### (Optional) Add a human viewer
 
 To let a human watch or take over, attach the screen-share SDK to the session
-using the session link from acquisition. See
-[Screen Sharing](./screen-sharing.md).
+using the session link from acquisition. The blueprint permissions this needs
+were already declared and consented in
+[Set up › step 3](#3-add-screen-sharing-computer-see-permissions-to-the-blueprint)
+and [step 4](#4-grant-admin-consent), so no blueprint change is required here.
+
+You need:
+
+- A **container** element with explicit width and height; the iframe fills 100%
+  of its parent.
+- A page served from a **secure context**: HTTPS, or `http://localhost` for local
+  development (not `file://`).
+- The **session link** for the target Cloud PC, from the
+  [acquire response](./api-reference.md#acquire-a-cloud-pc).
+- An agent token carrying **`Computer.See`** (view) and, for shared control,
+  **`Computer.Control`**.
+
+See [Screen Sharing](./screen-sharing.md) for the SDK API, error codes, and a
+minimal working example.
 
 ---
 
@@ -272,9 +388,13 @@ Confirm each layer works before you build on it:
 
 1. **Identity** — the SDK (or your exchange) returns an agent-user token whose
    audience is the Computer-Use server. A 401 means token/audience; a 403 means
-   consent isn't granted (revisit [Set up › step 3](#3-grant-admin-consent)).
+   consent isn't granted (revisit [Set up › step 4](#4-grant-admin-consent)).
 2. **Tooling** — `tools/list` against the ATG returns the Computer-Use tools.
-3. **Session** — acquire a Cloud PC, poll until `Ready`, call `take_screenshot`,
+3. **Screen-share permissions** — `a365 query-entra blueprint-scopes` shows
+   `Computer.See` and `Computer.Control`, and `a365 query-entra inheritance`
+   shows W365Agents-Production in `inheritablePermissions`. Checking this now
+   avoids a re-publish later (see [Set up › step 3](#3-add-screen-sharing-computer-see-permissions-to-the-blueprint)).
+4. **Session** — acquire a Cloud PC, poll until `Ready`, call `take_screenshot`,
    then release. This is the [first-call loop above](#make-your-first-computer-use-call)
    end to end.
 
@@ -299,8 +419,11 @@ snags:
 
 | Symptom | Likely cause | Where to look |
 |---------|--------------|---------------|
-| **403** on Computer-Use | MCP permissions not consented | [Set up › step 3](#3-grant-admin-consent) |
+| **403** on Computer-Use | MCP permissions not consented | [Set up › step 4](#4-grant-admin-consent) |
 | **401** on Computer-Use | Token missing/expired/wrong audience | [Authentication](./authentication.md) |
+| Screen share fails to start, or the token has no `Computer.See` | ARI scopes never declared on the blueprint | [Set up › step 3](#3-add-screen-sharing-computer-see-permissions-to-the-blueprint) |
+| Blueprint scopes look right but agent instances lack them | Inheritance entry missing for the ARI resource | [Set up › step 3 › If inheritance is missing](#if-inheritance-is-missing) |
+| `MODE_RESTRICTED` when taking control | Viewer created in `viewOnly` mode, or `Computer.Control` not granted | [Screen Sharing](./screen-sharing.md) |
 | CLI flag rejected | `add-mcp-servers` usage differs from docs | run `a365 develop add-mcp-servers -h` |
 | Blueprint not visible / consent pending | Non-admin ran setup | [Setup agent blueprint › consent](https://learn.microsoft.com/en-us/microsoft-agent-365/developer/registration) |
 | Tool call: device not ready | Cloud PC still starting | poll [Get Computer Status](./api-reference.md#get-computer-status) |
