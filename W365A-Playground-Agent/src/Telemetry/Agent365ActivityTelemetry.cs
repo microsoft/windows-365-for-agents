@@ -47,6 +47,11 @@ public sealed class Agent365ActivityTelemetry
         int inputTextLength,
         CancellationToken cancellationToken)
     {
+        if (!_configuration.GetValue<bool>("EnableAgent365Exporter"))
+        {
+            return null;
+        }
+
         if (!turnContext.IsAgenticRequest())
         {
             return null;
@@ -438,7 +443,7 @@ public sealed class Agent365ToolOperation : IDisposable
         });
         if (!success)
         {
-            _scope.RecordError(new InvalidOperationException(outcome));
+            _scope.RecordError(Agent365ActivityTelemetry.RedactedFailure(new InvalidOperationException()));
         }
     }
 
