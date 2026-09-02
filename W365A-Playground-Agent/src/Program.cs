@@ -3,8 +3,8 @@
 
 using System.Reflection;
 
-using Microsoft.Agents.A365.Observability.Hosting.Caching;
 using Microsoft.Agents.A365.Observability.Extensions.AgentFramework;
+using Microsoft.Agents.A365.Observability.Hosting.Caching;
 using Microsoft.Agents.A365.Observability.Runtime;
 using Microsoft.Agents.A365.Observability.Runtime.Tracing.Exporters;
 using Microsoft.Agents.A365.Tooling.Extensions.AgentFramework.Services;

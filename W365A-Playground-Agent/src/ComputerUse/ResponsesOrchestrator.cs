@@ -25,7 +25,7 @@ namespace Microsoft.W365APlaygroundAgent.ComputerUse;
 /// <summary>Result of a forced MCP tool re-enumeration: fresh tools plus whether a new token was minted (Signal 2).</summary>
 public sealed record ToolReacquireResult(IList<AITool> Tools, bool? TokenRefreshed);
 
-public sealed record AgentTurnOutputSummary(int MessageCount, int TextLength);
+internal sealed record AgentTurnOutputSummary(int MessageCount, int TextLength);
 
 /// <summary>
 /// Stateless Responses API orchestrator that manages the agentic tool-call loop for each conversation.
@@ -321,7 +321,7 @@ public sealed class ResponsesOrchestrator
     /// and repeats until the model returns a final message with no further tool calls.
     /// Streams text chunks back to the user via <see cref="ITurnContext.StreamingResponse"/> as they arrive.
     /// </summary>
-    public async Task<AgentTurnOutputSummary> RunAsync(
+    internal async Task<AgentTurnOutputSummary> RunAsync(
         string conversationKey,
         string userMessage,
         string instructions,
@@ -538,7 +538,8 @@ public sealed class ResponsesOrchestrator
                         "unknown_tool",
                         callId,
                         argumentsJson,
-                        "Unknown",
+                        "function",
+                        null,
                         "unknown");
                     _logger.LogWarning("Tool '{Name}' not found.", name);
                     history.Add(MakeFunctionCallOutput(callId, $"Tool '{name}' not found."));
@@ -547,89 +548,91 @@ public sealed class ResponsesOrchestrator
                 }
 
                 var (toolServer, toolShortName, toolKind) = ClassifyTool(func.Name);
+                var isMcpTool = !string.Equals(toolServer, UnknownServerName, StringComparison.Ordinal);
                 using var toolTelemetry = agent365Turn?.StartTool(
                     toolShortName,
                     callId,
                     argumentsJson,
-                    toolKind.ToString(),
-                    toolServer);
+                    isMcpTool ? "MCP Server" : "function",
+                    isMcpTool ? toolServer : null,
+                    toolKind.ToDimValue());
                 try
                 {
                     var outcome = await HandleToolCallAsync(state, history, func, callId, argumentsJson, turnContext, agent365Turn, cancellationToken, isFinalAttempt: _max401RetriesPerCall <= 0);
 
-                // Reactive MCP 401 recovery: re-enumerate tools (fresh transport token) and retry,
-                // bounded by _max401RetriesPerCall (per call) AND _max401ReacquiresPerTurn (per turn).
-                // Every exit path appends EXACTLY ONE paired function_call_output for this call_id —
-                // including when re-acquisition itself throws (e.g. the token endpoint can't mint a
-                // fresh token) — so the OpenAI Responses API contract is never left with an orphan.
-lastReacquireTokenRefreshed = null; // Signal 2 applies only to reacquires attempted for this tool call
-bool entered401 = outcome == ToolCallOutcome.Mcp401;
-bool recovered = false;
-int retryCount = 0;
-                for (int retry = 1; outcome == ToolCallOutcome.Mcp401 && retry <= _max401RetriesPerCall; retry++)
-                {
-                    retryCount++;
-                    var isFinal = retry >= _max401RetriesPerCall;
-                    try
+                    // Reactive MCP 401 recovery: re-enumerate tools (fresh transport token) and retry,
+                    // bounded by _max401RetriesPerCall (per call) AND _max401ReacquiresPerTurn (per turn).
+                    // Every exit path appends EXACTLY ONE paired function_call_output for this call_id —
+                    // including when re-acquisition itself throws (e.g. the token endpoint can't mint a
+                    // fresh token) — so the OpenAI Responses API contract is never left with an orphan.
+                    lastReacquireTokenRefreshed = null; // Signal 2 applies only to reacquires attempted for this tool call
+                    bool entered401 = outcome == ToolCallOutcome.Mcp401;
+                    bool recovered = false;
+                    int retryCount = 0;
+                    for (int retry = 1; outcome == ToolCallOutcome.Mcp401 && retry <= _max401RetriesPerCall; retry++)
                     {
-                        if (await TryReacquireToolsAsync().ConfigureAwait(false)
-                            && toolsByName.TryGetValue(name, out var freshFunc))
+                        retryCount++;
+                        var isFinal = retry >= _max401RetriesPerCall;
+                        try
                         {
-                            outcome = await HandleToolCallAsync(state, history, freshFunc, callId, argumentsJson, turnContext, agent365Turn, cancellationToken, isFinalAttempt: isFinal);
-                            if (outcome != ToolCallOutcome.Mcp401)
+                            if (await TryReacquireToolsAsync().ConfigureAwait(false)
+                                && toolsByName.TryGetValue(name, out var freshFunc))
                             {
-                                recovered = true;
+                                outcome = await HandleToolCallAsync(state, history, freshFunc, callId, argumentsJson, turnContext, agent365Turn, cancellationToken, isFinalAttempt: isFinal);
+                                if (outcome != ToolCallOutcome.Mcp401)
+                                {
+                                    recovered = true;
+                                }
+                            }
+                            else
+                            {
+                                // Reacquire budget exhausted or tool gone post-refresh — emit the single
+                                // paired output and stop.
+                                history.Add(MakeFunctionCallOutput(callId, "Tool error: MCP authorization expired (401) and could not be refreshed this turn."));
+                                outcome = ToolCallOutcome.CompletedFailure;
                             }
                         }
-                        else
+                        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                         {
-                            // Reacquire budget exhausted or tool gone post-refresh — emit the single
-                            // paired output and stop.
-                            history.Add(MakeFunctionCallOutput(callId, "Tool error: MCP authorization expired (401) and could not be refreshed this turn."));
+                            throw;
+                        }
+                        catch (Exception ex)
+                        {
+                            // Re-enumeration itself failed. Still append exactly one paired output so the
+                            // call_id is satisfied and history is not poisoned with an orphan function_call.
+                            _logger.LogWarning(ex, "MCP 401 recovery: tool re-acquisition failed for '{Name}'; emitting paired error output.", name);
+                            history.Add(MakeFunctionCallOutput(callId, "Tool error: MCP authorization expired (401) and token refresh failed this turn."));
                             outcome = ToolCallOutcome.CompletedFailure;
                         }
                     }
-                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                    {
-                        throw;
-                    }
-                    catch (Exception ex)
-                    {
-                        // Re-enumeration itself failed. Still append exactly one paired output so the
-                        // call_id is satisfied and history is not poisoned with an orphan function_call.
-                        _logger.LogWarning(ex, "MCP 401 recovery: tool re-acquisition failed for '{Name}'; emitting paired error output.", name);
-                        history.Add(MakeFunctionCallOutput(callId, "Tool error: MCP authorization expired (401) and token refresh failed this turn."));
-                        outcome = ToolCallOutcome.CompletedFailure;
-                    }
-                }
 
-                // 401 classification: Signal 1 (retry outcome) + Signal 2 (token freshness).
-                if (entered401)
-                {
-                    string label, kind;
-                    if (recovered)
+                    // 401 classification: Signal 1 (retry outcome) + Signal 2 (token freshness).
+                    if (entered401)
                     {
-                        label = "recoverable";
-                        kind = lastReacquireTokenRefreshed switch { true => "token-expiry", false => "gateway-session-idle", _ => "unknown" };
+                        string label, kind;
+                        if (recovered)
+                        {
+                            label = "recoverable";
+                            kind = lastReacquireTokenRefreshed switch { true => "token-expiry", false => "gateway-session-idle", _ => "unknown" };
+                        }
+                        else if (outcome == ToolCallOutcome.Mcp401) { label = "other-genuine"; kind = "still-401-after-refresh"; }
+                        else { label = "recovery-unavailable"; kind = "reacquire-failed-or-budget"; }
+                        _logger.LogWarning("MCP401Classification conv={Key} path=function-tool tool={Tool} outcome={Label} kind={Kind} (signal1=retry-{Retry}, signal2=tokenRefreshed={Refreshed}).",
+                            conversationKey, name, label, kind, recovered ? "success" : "failed", lastReacquireTokenRefreshed?.ToString() ?? "unknown");
                     }
-                    else if (outcome == ToolCallOutcome.Mcp401) { label = "other-genuine"; kind = "still-401-after-refresh"; }
-                    else { label = "recovery-unavailable"; kind = "reacquire-failed-or-budget"; }
-                    _logger.LogWarning("MCP401Classification conv={Key} path=function-tool tool={Tool} outcome={Label} kind={Kind} (signal1=retry-{Retry}, signal2=tokenRefreshed={Refreshed}).",
-                        conversationKey, name, label, kind, recovered ? "success" : "failed", lastReacquireTokenRefreshed?.ToString() ?? "unknown");
-                }
 
-                var toolSucceeded = outcome == ToolCallOutcome.CompletedSuccess;
-                var toolOutcome = toolSucceeded
-                    ? "success"
-                    : outcome == ToolCallOutcome.Mcp401
-                        ? "authorization_failed"
-                        : "tool_failed";
-                toolTelemetry?.Complete(
-                    toolSucceeded,
-                    retryCount,
-                    recovered,
-                    lastReacquireTokenRefreshed,
-                    toolOutcome);
+                    var toolSucceeded = outcome == ToolCallOutcome.CompletedSuccess;
+                    var toolOutcome = toolSucceeded
+                        ? "success"
+                        : outcome == ToolCallOutcome.Mcp401
+                            ? "authorization_failed"
+                            : "tool_failed";
+                    toolTelemetry?.Complete(
+                        toolSucceeded,
+                        retryCount,
+                        recovered,
+                        lastReacquireTokenRefreshed,
+                        toolOutcome);
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
@@ -916,8 +919,9 @@ int retryCount = 0;
                 "computer_call",
                 callId,
                 call.GetRawText(),
-                ToolKind.CuaDesktopControl.ToString(),
-                W365ComputerUseServerName);
+                "MCP Server",
+                W365ComputerUseServerName,
+                ToolKind.CuaDesktopControl.ToDimValue());
             _logger.LogWarning(
                 "HandleComputerCallAsync (callId={CallId}): no active W365 session — emitting placeholder screenshot and corrective hint.",
                 callId);
@@ -953,8 +957,9 @@ int retryCount = 0;
                 "computer_call",
                 callId,
                 call.GetRawText(),
-                ToolKind.CuaDesktopControl.ToString(),
-                W365ComputerUseServerName);
+                "MCP Server",
+                W365ComputerUseServerName,
+                ToolKind.CuaDesktopControl.ToDimValue());
             _logger.LogWarning("HandleComputerCallAsync (callId={CallId}): no action/actions field — emitting placeholder.", callId);
             history.Add(MakeComputerCallOutput(callId, PlaceholderPngBase64));
             missingActionTelemetry?.Complete(false, 0, false, null, "action_missing");
@@ -983,8 +988,9 @@ int retryCount = 0;
                     "take_screenshot",
                     actionOperationId,
                     "{}",
-                    ToolKind.CuaDesktopControl.ToString(),
-                    W365ComputerUseServerName);
+                    "MCP Server",
+                    W365ComputerUseServerName,
+                    ToolKind.CuaDesktopControl.ToDimValue());
                 var ssStart = System.Diagnostics.Stopwatch.GetTimestamp();
                 try
                 {
@@ -1039,8 +1045,9 @@ int retryCount = 0;
                     "computer.unsupported",
                     actionOperationId,
                     action.GetRawText(),
-                    ToolKind.CuaDesktopControl.ToString(),
-                    W365ComputerUseServerName);
+                    "MCP Server",
+                    W365ComputerUseServerName,
+                    ToolKind.CuaDesktopControl.ToDimValue());
                 unsupportedTelemetry?.Complete(
                     false,
                     0,
@@ -1056,8 +1063,9 @@ int retryCount = 0;
                 toolName,
                 actionOperationId,
                 action.GetRawText(),
-                ToolKind.CuaDesktopControl.ToString(),
-                W365ComputerUseServerName);
+                "MCP Server",
+                W365ComputerUseServerName,
+                ToolKind.CuaDesktopControl.ToDimValue());
             var actStart = System.Diagnostics.Stopwatch.GetTimestamp();
             try
             {
@@ -1098,8 +1106,9 @@ int retryCount = 0;
                 "take_screenshot",
                 $"{callId}:post-action-screenshot",
                 "{}",
-                ToolKind.CuaDesktopControl.ToString(),
-                W365ComputerUseServerName);
+                "MCP Server",
+                W365ComputerUseServerName,
+                ToolKind.CuaDesktopControl.ToDimValue());
             try
             {
                 var ss = await CaptureScreenshotAsync(state, cancellationToken).ConfigureAwait(false);
@@ -1965,8 +1974,9 @@ int retryCount = 0;
                     "take_screenshot",
                     $"initial-screenshot:{sessionId}",
                     "{}",
-                    ToolKind.CuaDesktopControl.ToString(),
-                    W365ComputerUseServerName);
+                    "MCP Server",
+                    W365ComputerUseServerName,
+                    ToolKind.CuaDesktopControl.ToDimValue());
                 try
                 {
                     var initial = await CaptureScreenshotAsync(state, cancellationToken).ConfigureAwait(false);

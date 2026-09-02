@@ -456,21 +456,32 @@ public class PlaygroundAgent : AgentApplication
                 var refreshRequested = _orchestrator.ConsumeToolRefreshRequest(conversationKey);
                 var tools = await GetToolsAsync(turnContext, turnState, authHandlerName, forceRefresh: refreshRequested);
                 var displayName = turnContext.Activity.From?.Name;
-// Reactive recovery: re-enumerate MCP tools with a fresh transport token if a tool
-// call hits a 401 mid-turn, surfacing whether the token was actually refreshed (Signal 2).
-Func<CancellationToken, Task<ToolReacquireResult>> reacquireTools = async ct =>
-{
-    ct.ThrowIfCancellationRequested();
-    var fresh = await GetToolsAsync(turnContext, turnState, authHandlerName, forceRefresh: true);
-    return new ToolReacquireResult(fresh, _lastForceRefreshTokenRefreshed);
-};
-var outputSummary = await _orchestrator.RunAsync(conversationKey, userText, GetAgentInstructions(displayName), tools, reacquireTools, turnContext,
-    agent365Turn,
-    // Mint-at-offer, fired MID-TURN the moment a new Cloud PC session starts, so the human can watch
-    // DURING the work (not only at end-of-turn). Mints the ARI token in this proven agentic turn.
-    (sessionId, screenShareUrl, ct) => OfferScreenshareCardAsync(turnContext, sessionId, screenShareUrl, authHandlerName, ct),
-    cancellationToken);
-agent365Turn?.RecordOutput(outputSummary.MessageCount, outputSummary.TextLength);
+                // Reactive recovery: re-enumerate MCP tools with a fresh transport token if a tool
+                // call hits a 401 mid-turn, surfacing whether the token was actually refreshed (Signal 2).
+                Func<CancellationToken, Task<ToolReacquireResult>> reacquireTools = async ct =>
+                {
+                    ct.ThrowIfCancellationRequested();
+                    var fresh = await GetToolsAsync(turnContext, turnState, authHandlerName, forceRefresh: true);
+                    return new ToolReacquireResult(fresh, _lastForceRefreshTokenRefreshed);
+                };
+
+                // Mint-at-offer fires when a Cloud PC session starts so the human can watch during the work.
+                var outputSummary = await _orchestrator.RunAsync(
+                    conversationKey,
+                    userText,
+                    GetAgentInstructions(displayName),
+                    tools,
+                    reacquireTools,
+                    turnContext,
+                    agent365Turn,
+                    (sessionId, screenShareUrl, ct) => OfferScreenshareCardAsync(
+                        turnContext,
+                        sessionId,
+                        screenShareUrl,
+                        authHandlerName,
+                        ct),
+                    cancellationToken);
+                agent365Turn?.RecordOutput(outputSummary.MessageCount, outputSummary.TextLength);
             }
             finally
             {
