@@ -4,7 +4,9 @@
 using System.Reflection;
 
 using Microsoft.Agents.A365.Observability.Extensions.AgentFramework;
+using Microsoft.Agents.A365.Observability.Hosting.Caching;
 using Microsoft.Agents.A365.Observability.Runtime;
+using Microsoft.Agents.A365.Observability.Runtime.Tracing.Exporters;
 using Microsoft.Agents.A365.Tooling.Extensions.AgentFramework.Services;
 using Microsoft.Agents.A365.Tooling.Services;
 using Microsoft.Agents.Builder;
@@ -32,6 +34,21 @@ builder.Services.AddHttpContextAccessor();
 builder.Logging.AddConsole();
 
 // ───── Microsoft Agent 365 (A365) services ─────
+// The agentic cache exchanges a live Teams turn token; the service cache retains only
+// the resulting bearer token for asynchronous batch export after the turn finishes.
+var agenticTelemetryTokenCache = new AgenticTokenCache();
+var serviceTelemetryTokenCache = new ServiceTokenCache();
+builder.Services.AddSingleton(agenticTelemetryTokenCache);
+builder.Services.AddSingleton<IExporterTokenCache<AgenticTokenStruct>>(agenticTelemetryTokenCache);
+builder.Services.AddSingleton(serviceTelemetryTokenCache);
+builder.Services.AddSingleton(new Agent365ExporterOptions
+{
+    ClusterCategory = "production",
+    TokenResolver = serviceTelemetryTokenCache.GetObservabilityToken,
+    UseS2SEndpoint = false
+});
+builder.Services.AddSingleton<Agent365ActivityTelemetry>();
+
 // A365 tracing wires the platform's blueprint/tenant baggage into OTel so traces correlate
 // with the A365 service-side observability backend.
 builder.AddA365Tracing(config =>
