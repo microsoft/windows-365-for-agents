@@ -8,6 +8,10 @@ using Microsoft.Agents.A365.Observability.Runtime.Tracing.Scopes;
 
 namespace Microsoft.W365APlaygroundAgent.Telemetry;
 
+/// <summary>
+/// Owns a child <c>chat</c> span for one logical model request, including its
+/// retries, token usage, redacted output summary, and final outcome.
+/// </summary>
 internal sealed class Agent365InferenceOperation : IDisposable
 {
     private readonly InferenceScope _scope;

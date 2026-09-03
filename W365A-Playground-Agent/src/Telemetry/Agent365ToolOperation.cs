@@ -8,6 +8,10 @@ using Microsoft.Agents.A365.Observability.Runtime.Tracing.Scopes;
 
 namespace Microsoft.W365APlaygroundAgent.Telemetry;
 
+/// <summary>
+/// Owns a child <c>execute_tool</c> span for one function, MCP, or computer-use
+/// operation, including sanitized arguments, retries, and final outcome.
+/// </summary>
 internal sealed class Agent365ToolOperation : IDisposable
 {
     private readonly ExecuteToolScope _scope;
@@ -36,6 +40,7 @@ internal sealed class Agent365ToolOperation : IDisposable
             agentDetails,
             userDetails,
             new SpanDetails(ActivityKind.Internal, parentContext));
+        // Keep the app-specific CUA taxonomy separate from canonical gen_ai.tool.type.
         _scope.RecordAttributes(new Dictionary<string, object?>
         {
             ["w365a.tool.kind"] = internalToolKind

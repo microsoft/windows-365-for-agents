@@ -9,6 +9,10 @@ using Microsoft.Agents.A365.Observability.Runtime.Tracing.Scopes;
 
 namespace Microsoft.W365APlaygroundAgent.Telemetry;
 
+/// <summary>
+/// Owns the root <c>invoke_agent</c> span for one human-to-agent turn and creates
+/// correlated inference and tool child operations.
+/// </summary>
 internal sealed class Agent365TurnOperation : IDisposable
 {
     private readonly AgentDetails _agentDetails;
@@ -30,6 +34,7 @@ internal sealed class Agent365TurnOperation : IDisposable
             new InvokeAgentScopeDetails(endpoint),
             agentDetails,
             new CallerDetails(userDetails));
+        // The SDK omits the default HTTPS port, but Agent 365 requires server.port.
         _scope.SetTagMaybe("server.port", endpoint.Port.ToString(CultureInfo.InvariantCulture));
     }
 
@@ -85,6 +90,7 @@ internal sealed class Agent365TurnOperation : IDisposable
 
     private static string SummarizeArguments(string argumentsJson)
     {
+        // Preserve only payload shape and value types; never export argument names or values.
         var summary = new Dictionary<string, object>(StringComparer.Ordinal);
         try
         {

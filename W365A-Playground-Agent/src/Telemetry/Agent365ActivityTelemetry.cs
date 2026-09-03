@@ -15,6 +15,10 @@ using Microsoft.W365APlaygroundAgent.Telemetry.AgentEnrichment;
 
 namespace Microsoft.W365APlaygroundAgent.Telemetry;
 
+/// <summary>
+/// Creates authenticated Agent 365 root operations for agentic Teams turns and applies
+/// the user, agent, tenant, conversation, and endpoint attribution required for ingestion.
+/// </summary>
 public sealed class Agent365ActivityTelemetry
 {
     private const string AgentName = "W365A Playground Agent";
@@ -25,6 +29,8 @@ public sealed class Agent365ActivityTelemetry
     private readonly ServiceTokenCache _serviceTokenCache;
     private readonly IConfiguration _configuration;
     private readonly ILogger<Agent365ActivityTelemetry> _logger;
+    // Serialize cold-cache token exchange so concurrent turns do not duplicate OBO work
+    // or replace each other's temporary turn-bound cache entry.
     private readonly SemaphoreSlim _tokenWarmLock = new(1, 1);
 
     public Agent365ActivityTelemetry(
@@ -106,6 +112,8 @@ public sealed class Agent365ActivityTelemetry
             }
         }
 
+        // Agent 365 requires server attributes; use the SDK sample's safe fallback when
+        // the channel does not provide a valid service URL.
         var endpoint = Uri.TryCreate(activity.ServiceUrl, UriKind.Absolute, out var parsedEndpoint)
             ? parsedEndpoint
             : new Uri("https://localhost/");
@@ -123,6 +131,8 @@ public sealed class Agent365ActivityTelemetry
             agenticUserId: agenticUserId,
             agentBlueprintId: blueprintId,
             tenantId: tenantId);
+        // No trustworthy client IP is available from the activity, so emit the required
+        // unspecified address rather than inventing a caller address.
         var userDetails = new UserDetails(
             userId: callerObjectId,
             userName: activity.From?.Name,
@@ -137,6 +147,10 @@ public sealed class Agent365ActivityTelemetry
         return new Agent365TurnOperation(agentDetails, userDetails, request, endpoint);
     }
 
+    /// <summary>
+    /// Exchanges the live turn token once, then copies the resulting bearer token into
+    /// the service cache used by the exporter without retaining the turn context.
+    /// </summary>
     private async Task WarmExporterTokenAsync(
         string agentId,
         string tenantId,
