@@ -37,6 +37,10 @@
 
 	</ItemGroup>
 
+	<ItemGroup>
+		<InternalsVisibleTo Include="W365APlaygroundAgent.Tests" />
+	</ItemGroup>
+
 	<!-- Exclude A365 CLI local-only config files from build output and publish.
 	     These contain tenant IDs and client secrets and must never be deployed. -->
 	<ItemGroup>
