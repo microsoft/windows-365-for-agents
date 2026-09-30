@@ -75,6 +75,26 @@ The agent listens on `http://localhost:3978/api/messages`.
 | Throttling | `src/Throttling/` | Per-user turn quota (100 / 24h) + global HTTP rate limit (5 / min) on `/api/messages` |
 | Platform | `Microsoft.Agents.A365.*` | Agent blueprint, MCP tooling, observability |
 
+## Teams screenshot preferences
+
+Screenshots are posted to Teams by default. Ask the agent to "stop sending screenshots"
+or "show screenshots again" to change that preference for the current conversation.
+The change is confirmed after the agent updates the preference; interrupting an already
+running task is not guaranteed.
+
+Text updates and Computer View are unchanged. Screenshots continue to be captured and
+provided to the model, so this reduces Teams image posts, not model image processing.
+Other channels and non-computer-use images retain their existing behavior.
+
+The preference shares the conversation's in-memory lifetime and resets after a process
+restart or conversation eviction. It is not a tenant-wide or permanent user setting.
+
+Run the focused tests from this sample directory:
+
+```powershell
+dotnet test .\tests\W365APlaygroundAgent.Tests.csproj
+```
+
 ## How Agent 365 concepts map to this sample
 
 | Agent 365 concept | In this sample |

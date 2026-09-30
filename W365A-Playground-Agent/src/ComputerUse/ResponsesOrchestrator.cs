@@ -30,7 +30,7 @@ internal sealed record AgentTurnOutputSummary(int MessageCount, int TextLength);
 /// <summary>
 /// Stateless Responses API orchestrator that manages the agentic tool-call loop for each conversation.
 /// Per-conversation history is held in memory, capped at <see cref="MaxConversations"/> entries (LRU eviction).
-/// Screenshots embedded in any tool result are detected, forwarded to the user via Teams, and injected
+/// Screenshots embedded in tool results are detected, forwarded according to the conversation's Teams preference, and injected
 /// as <c>input_image</c> for the model — then pruned from history after each model call to prevent
 /// base64 accumulation across long CUA sessions.
 /// </summary>
@@ -49,6 +49,7 @@ public sealed class ResponsesOrchestrator
     {
         public List<JsonElement> History { get; } = [];
         public DateTime LastAccessed { get; set; } = DateTime.UtcNow;
+        public TeamsScreenshotDelivery ScreenshotDelivery { get; } = new();
 
         /// <summary>
         /// The currently SELECTED W365 sessionId for this conversation. Used for auto-injection
@@ -345,6 +346,20 @@ public sealed class ResponsesOrchestrator
         state.LastAccessed = DateTime.UtcNow;
         EnsureW365McpClient(tools, state);
 
+        AIFunction? screenshotDeliveryTool = null;
+        if (TeamsScreenshotDelivery.IsTeams(turnContext))
+        {
+            screenshotDeliveryTool = state.ScreenshotDelivery.CreateTool(_logger);
+            instructions += $"""
+
+
+                Teams screenshot delivery:
+                - When the user explicitly asks to stop or resume screenshot posts, call {TeamsScreenshotDelivery.ToolName} with enabled=false or enabled=true before any desktop work. Confirm the change only after the tool succeeds.
+                - A screenshot-preference-only request does not require a Cloud PC session or desktop tools.
+                - This preference changes Teams image posts only. Continue existing concise text progress and screenshots needed for computer use. Do not change the preference for a one-off screenshot request.
+                """;
+        }
+
         // Per-turn W365 session inventory snapshot — lets us audit accumulation across turns
         // and correlate any auto-injection / shutdown-cleanup log lines with the state going in.
         if (state.W365SessionIds.Count > 0)
@@ -379,6 +394,14 @@ public sealed class ResponsesOrchestrator
                 .ToDictionary(g => g.Key, g => g.First());
 
             var augmented = new List<AITool>(currentTools);
+            if (screenshotDeliveryTool is not null)
+            {
+                if (!toolsByName.TryAdd(screenshotDeliveryTool.Name, screenshotDeliveryTool))
+                {
+                    throw new InvalidOperationException($"Duplicate reserved tool name: {screenshotDeliveryTool.Name}");
+                }
+                augmented.Add(screenshotDeliveryTool);
+            }
             if (state.W365McpClient is not null && state.W365DesktopToolsCatalog is { Count: > 0 } catalog)
             {
                 var addedCount = 0;
@@ -743,8 +766,8 @@ public sealed class ResponsesOrchestrator
 
     /// <summary>
     /// Invokes a tool and handles its result. If the result contains embedded image data — which any
-    /// W365 computer-use tool can return as a screenshot — the image is sent directly to the user via
-    /// Teams and injected as <c>input_image</c> for the next model call. Text results are appended
+    /// W365 computer-use tool can return as a screenshot — delivery respects the Teams preference,
+    /// while the image is still injected as <c>input_image</c> for the next model call. Text results are appended
     /// as a <c>function_call_output</c> history item.
     /// </summary>
     private async Task<ToolCallOutcome> HandleToolCallAsync(
@@ -853,20 +876,16 @@ public sealed class ResponsesOrchestrator
         var imageResult = ExtractBase64FromResult(result);
         if (imageResult is { } img)
         {
-            _logger.LogInformation("Tool '{Name}': image detected ({Chars} chars, {MimeType}), sending to user", func.Name, img.Base64.Length, img.MimeType);
-
-            // Send image directly to user — orchestrator has the real bytes; LLM cannot forward them
-            var ext = img.MimeType.Contains("png", StringComparison.OrdinalIgnoreCase) ? "png" : "jpg";
-            var imageActivity = MessageFactory.Attachment(new Attachment
-            {
-                ContentType = img.MimeType,
-                ContentUrl = $"data:{img.MimeType};base64,{img.Base64}",
-                Name = $"screenshot-{DateTime.UtcNow:HHmmss}.{ext}"
-            });
-            await turnContext.SendActivityAsync(imageActivity, cancellationToken);
+            _logger.LogInformation("Tool '{Name}': image detected ({Chars} chars, {MimeType})", func.Name, img.Base64.Length, img.MimeType);
+            var imageSent = await state.ScreenshotDelivery.SendAsync(
+                turnContext, img.Base64, img.MimeType,
+                string.Equals(toolServer, W365ComputerUseServerName, StringComparison.Ordinal),
+                cancellationToken);
 
             // Put placeholder in tool output, inject image as a separate user message so the model can see it
-            history.Add(MakeFunctionCallOutput(callId, "[Screenshot captured — image sent to user and injected as visual input]"));
+            history.Add(MakeFunctionCallOutput(callId, imageSent
+                ? "[Screenshot captured — image sent to user and injected as visual input]"
+                : "[Screenshot captured for model input; screenshot posts to Teams are disabled.]"));
             history.Add(MakeInputImageMessage($"data:{img.MimeType};base64,{img.Base64}"));
         }
         else
@@ -895,7 +914,7 @@ public sealed class ResponsesOrchestrator
     /// Process a single <c>computer_call</c> output item from the model.
     /// Handles both the singular <c>action</c> shape and the plural <c>actions[]</c> shape.
     /// Translates each action via <see cref="MapActionToMcpTool"/>, invokes the corresponding
-    /// W365 MCP desktop tool, captures a final screenshot, sends it to the user, and appends a
+    /// W365 MCP desktop tool, captures a final screenshot, applies the delivery preference, and appends a
     /// paired <c>computer_call_output</c> history item. Failure paths still append a valid
     /// paired output (placeholder PNG) so the next Responses API call doesn't reject the
     /// turn with "computer_call provided without its required output" — a hard API constraint.
@@ -1149,17 +1168,9 @@ public sealed class ResponsesOrchestrator
             return;
         }
 
-        // Send the screenshot to the user via the same Teams attachment path that function
-        // tools use, then append the paired computer_call_output with the same image as a
-        // data URL.
-        var ext = finalScreenshotMime.Contains("png", StringComparison.OrdinalIgnoreCase) ? "png" : "jpg";
-        var imageActivity = MessageFactory.Attachment(new Attachment
-        {
-            ContentType = finalScreenshotMime,
-            ContentUrl = $"data:{finalScreenshotMime};base64,{finalScreenshotB64}",
-            Name = $"screenshot-{DateTime.UtcNow:HHmmss}.{ext}"
-        });
-        await turnContext.SendActivityAsync(imageActivity, cancellationToken);
+        await state.ScreenshotDelivery.SendAsync(
+            turnContext, finalScreenshotB64, finalScreenshotMime,
+            isComputerUseScreenshot: true, cancellationToken: cancellationToken);
 
         history.Add(MakeComputerCallOutput(callId, finalScreenshotB64, finalScreenshotMime));
     }
