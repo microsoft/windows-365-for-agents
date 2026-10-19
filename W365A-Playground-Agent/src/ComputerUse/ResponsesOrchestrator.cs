@@ -48,6 +48,8 @@ public sealed class ResponsesOrchestrator
     private sealed class ConversationState
     {
         public List<JsonElement> History { get; } = [];
+        public SemaphoreSlim TurnGate { get; } = new(1, 1);
+        public int ActiveOrQueuedTurns { get; set; }
         public DateTime LastAccessed { get; set; } = DateTime.UtcNow;
         public TeamsScreenshotDelivery ScreenshotDelivery { get; } = new();
 
@@ -333,16 +335,60 @@ public sealed class ResponsesOrchestrator
         Func<string, string, CancellationToken, Task>? offerScreenshareAsync,
         CancellationToken cancellationToken)
     {
-        // Soft cap: evict the least-recently-used conversation when a new key would exceed the limit.
-        // ContainsKey + GetOrAdd is not atomic, so count may briefly exceed MaxConversations under
-        // concurrent load — acceptable for a demo; the cap is a guideline, not a hard guarantee.
-        if (!_conversations.ContainsKey(conversationKey) && _conversations.Count >= MaxConversations)
+        ConversationState state;
+        lock (_conversations)
         {
-            var oldest = _conversations.MinBy(kvp => kvp.Value.LastAccessed);
-            _conversations.TryRemove(oldest.Key, out _);
-            _logger.LogInformation("Conversation cap reached ({Max}). Evicted: {Key}", MaxConversations, oldest.Key);
+            // Keep active and queued turns on the same state; the cap stays soft when all are busy.
+            if (!_conversations.ContainsKey(conversationKey) && _conversations.Count >= MaxConversations)
+            {
+                var oldest = _conversations
+                    .Where(kvp => kvp.Value.ActiveOrQueuedTurns == 0)
+                    .OrderBy(kvp => kvp.Value.LastAccessed)
+                    .FirstOrDefault();
+                if (oldest.Value is not null)
+                {
+                    _conversations.TryRemove(oldest.Key, out _);
+                    _logger.LogInformation("Conversation cap reached ({Max}). Evicted: {Key}", MaxConversations, oldest.Key);
+                }
+            }
+
+            state = _conversations.GetOrAdd(conversationKey, _ => new ConversationState());
+            state.ActiveOrQueuedTurns++;
         }
-        var state = _conversations.GetOrAdd(conversationKey, _ => new ConversationState());
+
+        var entered = false;
+        try
+        {
+            await state.TurnGate.WaitAsync(cancellationToken);
+            entered = true;
+            return await RunTurnAsync(state, conversationKey, userMessage, instructions, tools,
+                reacquireTools, turnContext, agent365Turn, offerScreenshareAsync, cancellationToken);
+        }
+        finally
+        {
+            if (entered)
+            {
+                state.TurnGate.Release();
+            }
+            lock (_conversations)
+            {
+                state.ActiveOrQueuedTurns--;
+            }
+        }
+    }
+
+    private async Task<AgentTurnOutputSummary> RunTurnAsync(
+        ConversationState state,
+        string conversationKey,
+        string userMessage,
+        string instructions,
+        IList<AITool> tools,
+        Func<CancellationToken, Task<ToolReacquireResult>> reacquireTools,
+        ITurnContext turnContext,
+        Agent365TurnOperation? agent365Turn,
+        Func<string, string, CancellationToken, Task>? offerScreenshareAsync,
+        CancellationToken cancellationToken)
+    {
         state.LastAccessed = DateTime.UtcNow;
         EnsureW365McpClient(tools, state);
 
@@ -478,6 +524,14 @@ public sealed class ResponsesOrchestrator
                     pending.Base64.Length, pending.MimeType);
                 history.Add(MakeInputImageMessage($"data:{pending.MimeType};base64,{pending.Base64}"));
                 state.PendingInitialScreenshot = null;
+            }
+
+            var removedImages = ScreenshotHistory.Trim(history);
+            if (removedImages > 0)
+            {
+                _logger.LogInformation(
+                    "Removed {Count} old screenshot(s) with their response/tool groups to stay within the {Limit}-image request budget.",
+                    removedImages, ScreenshotHistory.MaxImagesPerRequest);
             }
 
             var response = await CallModelAsync(history, instructions, toolDefs, agent365Turn, cancellationToken);
