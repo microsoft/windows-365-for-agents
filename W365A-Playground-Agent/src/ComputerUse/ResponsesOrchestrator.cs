@@ -339,17 +339,19 @@ public sealed class ResponsesOrchestrator
         lock (_conversations)
         {
             // Keep active and queued turns on the same state; the cap stays soft when all are busy.
-            if (!_conversations.ContainsKey(conversationKey) && _conversations.Count >= MaxConversations)
+            while (!_conversations.ContainsKey(conversationKey) && _conversations.Count >= MaxConversations)
             {
                 var oldest = _conversations
                     .Where(kvp => kvp.Value.ActiveOrQueuedTurns == 0)
                     .OrderBy(kvp => kvp.Value.LastAccessed)
                     .FirstOrDefault();
-                if (oldest.Value is not null)
+                if (oldest.Value is null)
                 {
-                    _conversations.TryRemove(oldest.Key, out _);
-                    _logger.LogInformation("Conversation cap reached ({Max}). Evicted: {Key}", MaxConversations, oldest.Key);
+                    break;
                 }
+
+                _conversations.TryRemove(oldest.Key, out _);
+                _logger.LogInformation("Conversation cap reached ({Max}). Evicted: {Key}", MaxConversations, oldest.Key);
             }
 
             state = _conversations.GetOrAdd(conversationKey, _ => new ConversationState());
