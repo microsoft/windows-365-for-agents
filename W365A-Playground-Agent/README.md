@@ -95,6 +95,14 @@ Run the focused tests from this sample directory:
 dotnet test .\tests\W365APlaygroundAgent.Tests.csproj
 ```
 
+## Screenshot history budget
+
+Each model request contains at most 50 images. When necessary, the oldest completed
+response/tool groups are removed together, including their screenshots and reasoning.
+User instructions and the newest group are preserved; older visual/tool context may be lost.
+Turns within one conversation execute serially; other conversations remain independent.
+This limits images per request, not the number of screenshots a workflow can take.
+
 ## How Agent 365 concepts map to this sample
 
 | Agent 365 concept | In this sample |
