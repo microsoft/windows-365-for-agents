@@ -12,7 +12,9 @@ using Microsoft.Agents.A365.Tooling.Services;
 using Microsoft.Agents.Builder;
 using Microsoft.Agents.Hosting.AspNetCore;
 using Microsoft.Agents.Storage;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Identity.Web;
 using Microsoft.W365APlaygroundAgent.Agent;
@@ -90,6 +92,12 @@ builder.Services.AddRateLimiter(options =>
 
 // ───── Auth & storage ─────
 // JWT validation for incoming Bot Framework / agentic tokens (config: TokenValidation:*).
+var validateIncomingTokens = builder.Configuration.GetValue<bool>("TokenValidation:Enabled");
+if (!builder.Environment.IsDevelopment() && !validateIncomingTokens)
+{
+    throw new InvalidOperationException(
+        "TokenValidation:Enabled must be true outside Development.");
+}
 builder.Services.AddAgentAspNetAuthentication(builder.Configuration);
 
 // Screenshare interactive web sign-in (OIDC): the viewer page requires the opener to sign in so
@@ -185,10 +193,18 @@ app.UseAuthorization();
 
 // Map the /api/messages endpoint to the AgentApplication.
 // RequireRateLimiting attaches the "messagesGlobal" policy declared above.
-app.MapPost("/api/messages", async (HttpRequest request, HttpResponse response, IAgentHttpAdapter adapter, IAgent agent, CancellationToken cancellationToken) =>
+var messagesEndpoint = app.MapPost("/api/messages", async (HttpRequest request, HttpResponse response, IAgentHttpAdapter adapter, IAgent agent, CancellationToken cancellationToken) =>
 {
     await adapter.ProcessAsync(request, response, agent, cancellationToken).ConfigureAwait(false);
 }).RequireRateLimiting("messagesGlobal");
+
+if (validateIncomingTokens)
+{
+    messagesEndpoint.RequireAuthorization(new AuthorizeAttribute
+    {
+        AuthenticationSchemes = JwtBearerDefaults.AuthenticationScheme
+    });
+}
 
 // Health check endpoint for CI/CD pipelines and monitoring
 app.MapGet("/api/health", () => Results.Ok(new { status = "healthy", timestamp = DateTime.UtcNow }));

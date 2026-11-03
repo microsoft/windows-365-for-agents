@@ -168,7 +168,17 @@ public static class TokenValidationExtensions
                         return;
                     }
 
-                    JwtSecurityToken token = new(parts[1]);
+                    JwtSecurityToken token;
+                    try
+                    {
+                        token = new JwtSecurityToken(parts[1]);
+                    }
+                    catch (Exception exception) when (
+                        exception is SecurityTokenException or ArgumentException)
+                    {
+                        context.Fail("Malformed bearer token.");
+                        return;
+                    }
                     string issuer = token.Claims.FirstOrDefault(claim => claim.Type == AuthenticationConstants.IssuerClaim)?.Value!;
 
                     if (validationOptions.AzureBotServiceTokenHandling && AuthenticationConstants.BotFrameworkTokenIssuer.Equals(issuer))
