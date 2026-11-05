@@ -75,10 +75,11 @@ public static class OpenTelemetryExtensions
             builder.Services.AddOpenTelemetry()
                 .UseAzureMonitor(options =>
                 {
-                    // Capture 100% of traces — no sampling (ground rule #7): the per-turn
-                    // AgentTurnSummary event + token/count telemetry must never be dropped.
-                    // (Logs are not subject to this trace sampler; this guarantees spans too.)
+                    // Preserve complete traces and summary logs, rather than the distro's
+                    // default rate limit and trace-based log filtering.
+                    options.TracesPerSecond = null;
                     options.SamplingRatio = 1.0F;
+                    options.EnableTraceBasedLogsSampler = false;
                 });
         }
 

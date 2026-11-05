@@ -36,27 +36,19 @@ builder.Services.AddHttpContextAccessor();
 builder.Logging.AddConsole();
 
 // ───── Microsoft Agent 365 (A365) services ─────
-// The agentic cache exchanges a live Teams turn token; the service cache retains only
-// the resulting bearer token for asynchronous batch export after the turn finishes.
-var agenticTelemetryTokenCache = new AgenticTokenCache();
-var serviceTelemetryTokenCache = new ServiceTokenCache();
-builder.Services.AddSingleton(agenticTelemetryTokenCache);
-builder.Services.AddSingleton<IExporterTokenCache<AgenticTokenStruct>>(agenticTelemetryTokenCache);
-builder.Services.AddSingleton(serviceTelemetryTokenCache);
-builder.Services.AddSingleton(new Agent365ExporterOptions
-{
-    ClusterCategory = "production",
-    TokenResolver = serviceTelemetryTokenCache.GetObservabilityToken,
-    UseS2SEndpoint = false
-});
 builder.Services.AddSingleton<Agent365ActivityTelemetry>();
-
-// A365 tracing wires the platform's blueprint/tenant baggage into OTel so traces correlate
-// with the A365 service-side observability backend.
-builder.AddA365Tracing(config =>
+if (builder.Configuration.GetValue<bool>("EnableAgent365Exporter"))
 {
-    config.WithAgentFramework();
-});
+    builder.Services.AddSingleton<AgenticTokenCache>();
+    builder.Services.AddSingleton<Agent365ObservabilityTokenProvider>();
+    builder.Services.AddSingleton<Agent365ExporterOptions>(services => new()
+    {
+        TokenResolver = (agentId, tenantId) => services
+            .GetRequiredService<Agent365ObservabilityTokenProvider>()
+            .GetTokenAsync(agentId, tenantId)
+    });
+    builder.AddA365Tracing(config => config.WithAgentFramework());
+}
 
 // A365 MCP tool registration: lets the agent enumerate and invoke MCP servers declared in
 // ToolingManifest.json (e.g. mcp_W365ComputerUse for Cloud PC computer use).
