@@ -23,8 +23,8 @@ By following this sample end-to-end, you will:
 - Use `UserManagedIdentity` auth in A365 production (managed identity + Federated Identity Credential).
 - Cap abuse with a **two-gate throttle**: 5 req/min global HTTP rate limit + per-user
   100 turns / 24 h rolling quota — so a runaway script can't burn unbounded LLM tokens.
-- Use the **`a365` CLI** to provision the agent blueprint, grant permissions, and deploy
-  to Azure App Service.
+- Use the **`a365` CLI** to provision the agent blueprint, grant permissions, and prepare
+  the agent package. Provision and deploy Azure hosting separately.
 
 ## Prerequisites (high level)
 
@@ -110,7 +110,34 @@ This limits images per request, not the number of screenshots a workflow can tak
 | Agent identity blueprint | `Connections:ServiceConnection` in `appsettings.json` (provisioned by `a365 setup all`) |
 | Work IQ MCP servers | `ToolingManifest.json` (gateway scopes granted via `a365 setup permissions mcp`) |
 | Agentic auth | `AgentApplication:AgenticAuthHandlerName: "agentic"` in `appsettings.json` |
-| Observability baggage | `src/Telemetry/A365OtelWrapper.cs` (per-turn tenant + agent ID) |
+| Observability baggage | `src/Telemetry/Agent365ActivityTelemetry.cs` (per-turn tenant + agent ID) |
+
+## Dependency baseline and Agent 365 SDK 2.0
+
+The direct package references use stable releases. Agent 365 tooling still brings
+required preview transitive dependencies; the redundant direct `Azure.AI.OpenAI`
+reference is intentionally omitted. Patched cryptography versions are pinned.
+
+Agent 365 SDK 2.0 exports observability through its app-only S2S endpoint.
+`Agent365ObservabilityTokenProvider` uses the configured service connection and
+caches validated tokens separately for each runtime agent and tenant. It does not
+retain a turn context or reuse workload OBO tokens for telemetry. MCP, Graph, Watch
+live, and incoming JWT authentication remain separate and unchanged.
+
+Azure Monitor is configured for complete trace and summary-log collection rather
+than its default rate-limited sampler. Keep telemetry payload redaction enabled.
+
+The repository-local tool manifest pins Agent 365 CLI 2.0.1. From this checkout:
+
+```powershell
+dotnet tool restore
+dotnet tool run a365 --version
+```
+
+CLI 2.0.1 manages agent setup and packaging, not Azure hosting deployment. The
+step-by-step tutorial was written for an older CLI; consult the
+[current command reference](https://learn.microsoft.com/microsoft-agent-365/developer/reference/cli/setup)
+for current setup and permission commands.
 
 ## Throttling
 

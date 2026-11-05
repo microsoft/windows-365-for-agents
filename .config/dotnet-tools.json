@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "isRoot": true,
+  "tools": {
+    "microsoft.agents.a365.devtools.cli": {
+      "version": "2.0.1",
+      "commands": ["a365"]
+    }
+  }
+}

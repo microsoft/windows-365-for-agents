@@ -359,12 +359,9 @@ public class PlaygroundAgent : AgentApplication
 
         // Activity attribution must be the human caller's Entra OID, never the bot or blueprint.
         var authHandlerName = turnContext.IsAgenticRequest() ? _agenticAuthHandlerName : _oboAuthHandlerName;
-        using var agent365Turn = await _agent365ActivityTelemetry.BeginTurnAsync(
+        using var agent365Turn = _agent365ActivityTelemetry.BeginTurn(
             turnContext,
-            UserAuthorization,
-            authHandlerName,
-            turnContext.Activity.Text?.Length ?? 0,
-            cancellationToken).ConfigureAwait(false);
+            turnContext.Activity.Text?.Length ?? 0);
 
         // Per-user turn quota: 100 turns per rolling 24h. Skipped in BEARER_TOKEN dev mode
         // (no real Teams caller in that flow). A blocked user sees a friendly text reply.
