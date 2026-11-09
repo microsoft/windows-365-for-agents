@@ -86,6 +86,11 @@ Text updates and Computer View are unchanged. Screenshots continue to be capture
 provided to the model, so this reduces Teams image posts, not model image processing.
 Other channels and non-computer-use images retain their existing behavior.
 
+Computer View access is provided by the application-owned **Watch live** card.
+The backend `screenShareUrl` stays available to the card issuer but is omitted from
+model-facing session results, so completion replies should not repeat a viewer link.
+Ordinary task-related web links are unaffected.
+
 The preference shares the conversation's in-memory lifetime and resets after a process
 restart or conversation eviction. It is not a tenant-wide or permanent user setting.
 
