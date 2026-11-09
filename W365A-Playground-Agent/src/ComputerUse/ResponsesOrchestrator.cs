@@ -960,7 +960,10 @@ public sealed class ResponsesOrchestrator
                 _logger.LogDebug("Tool '{Name}' result body: {Result}", func.Name, resultStr);
             }
 
-            history.Add(MakeFunctionCallOutput(callId, resultStr));
+            var modelResult = W365LifecycleToolNames.Contains(func.Name)
+                ? RemoveScreenShareUrlsFromModelResult(resultStr)
+                : resultStr;
+            history.Add(MakeFunctionCallOutput(callId, modelResult));
         }
 
         return ToolCallOutcome.CompletedSuccess;
@@ -1820,6 +1823,65 @@ public sealed class ResponsesOrchestrator
             return true;
         }
         return false;
+    }
+
+    internal static string RemoveScreenShareUrlsFromModelResult(string result)
+    {
+        JsonNode? node;
+        try
+        {
+            node = JsonNode.Parse(result);
+        }
+        catch (JsonException)
+        {
+            return result;
+        }
+
+        return node is not null && RemoveScreenShareUrlProperties(node)
+            ? node.ToJsonString(JsonOptions)
+            : result;
+    }
+
+    private static bool RemoveScreenShareUrlProperties(JsonNode node)
+    {
+        var changed = false;
+        if (node is JsonObject obj)
+        {
+            foreach (var property in obj.ToArray())
+            {
+                if (string.Equals(property.Key, "screenShareUrl", StringComparison.OrdinalIgnoreCase))
+                {
+                    obj.Remove(property.Key);
+                    changed = true;
+                }
+                else if (property.Key == "text" && property.Value is JsonValue value
+                    && value.TryGetValue<string>(out var text))
+                {
+                    // MCP text blocks can contain a JSON-encoded lifecycle result.
+                    var sanitized = RemoveScreenShareUrlsFromModelResult(text);
+                    if (!string.Equals(sanitized, text, StringComparison.Ordinal))
+                    {
+                        obj[property.Key] = sanitized;
+                        changed = true;
+                    }
+                }
+                else if (property.Value is not null)
+                {
+                    changed |= RemoveScreenShareUrlProperties(property.Value);
+                }
+            }
+        }
+        else if (node is JsonArray array)
+        {
+            foreach (var item in array)
+            {
+                if (item is not null)
+                {
+                    changed |= RemoveScreenShareUrlProperties(item);
+                }
+            }
+        }
+        return changed;
     }
 
     /// <summary>Best-effort read of "screenShareUrl" from a StartSession result (top-level or nested).</summary>
