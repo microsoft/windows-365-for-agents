@@ -25,7 +25,9 @@ public class McpSessionRecoveryTests
 {
     private const string Start = "mcp_W365ComputerUse_StartSession";
     private const string End = "mcp_W365ComputerUse_EndSession";
+    private const string Details = "mcp_W365ComputerUse_GetSessionDetails";
     private const string CloudPcId = "cloud-pc-1";
+    private const string ScreenShareUrl = "https://computer.invalid/computers/one/screenshare?api-version=test";
 
     [Theory]
     [InlineData(HttpTransportMode.AutoDetect)]
@@ -188,6 +190,116 @@ public class McpSessionRecoveryTests
         Assert.True(fixture.Orchestrator.ConsumeToolRefreshRequest("conversation"));
     }
 
+    [Theory]
+    [InlineData(429)]
+    [InlineData(500)]
+    [InlineData(0)]
+    public async Task NonSessionReplayFailurePreservesFreshClientForCheckIn(int status)
+    {
+        await using var server = new McpServer { FailureOperation = "operation" };
+        await server.ConnectAsync();
+        var recovery = server.CreateRecovery();
+        Exception failure = status == 0
+            ? new TimeoutException("Replay timed out")
+            : new HttpRequestException("Replay rejected", null, (HttpStatusCode)status);
+        var attempts = 0;
+
+        var actual = await Assert.ThrowsAnyAsync<Exception>(() =>
+            recovery.ExecuteAsync("operation", async ct =>
+            {
+                if (++attempts == 2)
+                {
+                    throw failure;
+                }
+                return await server.CallAsync("operation", ct);
+            }, CancellationToken.None));
+
+        Assert.Same(failure, actual);
+        Assert.False(recovery.IsUnavailable);
+        var freshClient = Assert.IsAssignableFrom<IMcpClient>(server.CurrentClient);
+        await recovery.ExecuteAsync(End, ct => server.CallAsync(End, ct), CancellationToken.None);
+        Assert.Same(freshClient, server.CurrentClient);
+        Assert.Equal(2, server.Initializations);
+        Assert.Equal("mcp-2", Assert.Single(server.Requests, r => r.Operation == End).TransportId);
+    }
+
+    [Theory]
+    [InlineData("http429")]
+    [InlineData("mcp-error")]
+    [InlineData("missing-session")]
+    public async Task FailedCheckoutDoesNotReofferAnOlderSession(string failureKind)
+    {
+        await using var server = new McpServer
+        {
+            FailureOperation = Start,
+            FailureStatus = HttpStatusCode.TooManyRequests,
+            FailuresRemaining = 0
+        };
+        using var fixture = await TurnFixture.CreateAsync(server);
+        await fixture.RunAsync();
+        Assert.Equal(CloudPcId, Assert.Single(fixture.OfferedSessions));
+        fixture.OfferedSessions.Clear();
+        var screenshotsBeforeFailure = server.Requests.Count(r => r.Operation == "take_screenshot");
+
+        if (failureKind == "http429")
+        {
+            server.FailuresRemaining = 1;
+        }
+        else
+        {
+            server.StartResultOverride = JsonSerializer.SerializeToNode(new
+            {
+                isError = failureKind == "mcp-error",
+                content = new[] { new
+                {
+                    type = "text",
+                    text = failureKind == "mcp-error"
+                        ? JsonSerializer.Serialize(new { sessionId = "error-only-session", screenShareUrl = ScreenShareUrl })
+                        : "Checkout did not return a session ID."
+                } }
+            });
+        }
+        fixture.Model.SetOutputs(
+            """[{"type":"function_call","call_id":"failed-checkout","name":"mcp_W365ComputerUse_StartSession","arguments":"{}"}]""",
+            """[{"type":"function_call","call_id":"details","name":"mcp_W365ComputerUse_GetSessionDetails","arguments":"{}"}]""",
+            "[]");
+
+        await fixture.RunAsync();
+
+        Assert.Empty(fixture.OfferedSessions);
+        Assert.Equal(CloudPcId, Assert.Single(server.Requests, r => r.Operation == Details).CloudPcId);
+        Assert.Equal(screenshotsBeforeFailure, server.Requests.Count(r => r.Operation == "take_screenshot"));
+        Assert.Equal(1, server.Initializations);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExistingSessionReofferRequiresSuccessfulComputerWork(bool failComputerWork)
+    {
+        await using var server = new McpServer();
+        using var fixture = await TurnFixture.CreateAsync(server);
+        await fixture.RunAsync();
+        Assert.Equal(CloudPcId, Assert.Single(fixture.OfferedSessions));
+        fixture.OfferedSessions.Clear();
+        server.ReturnToolError = failComputerWork;
+        fixture.Model.SetOutputs(
+            """[{"type":"computer_call","call_id":"computer","action":{"type":"click","x":1,"y":2}}]""",
+            "[]");
+
+        await fixture.RunAsync();
+
+        if (failComputerWork)
+        {
+            Assert.Empty(fixture.OfferedSessions);
+        }
+        else
+        {
+            Assert.Equal(CloudPcId, Assert.Single(fixture.OfferedSessions));
+        }
+        Assert.Single(server.Requests, r => r.Operation == Start);
+    }
+
     private sealed class TurnFixture : IDisposable
     {
         private readonly McpServer _server;
@@ -196,6 +308,7 @@ public class McpSessionRecoveryTests
         private IList<AITool> _tools = [];
         public ScriptedModel Model { get; } = new();
         public ResponsesOrchestrator Orchestrator { get; }
+        public List<string> OfferedSessions { get; } = [];
 
         private TurnFixture(McpServer server)
         {
@@ -239,7 +352,11 @@ public class McpSessionRecoveryTests
                 await _server.ConnectAsync(ct);
                 _tools = await _server.ListToolsAsync(ct);
                 return new ToolReacquireResult(_tools, true);
-            }, _context, null, null, cts.Token);
+            }, _context, null, (sessionId, _, _) =>
+            {
+                OfferedSessions.Add(sessionId);
+                return Task.CompletedTask;
+            }, cts.Token);
         }
 
         public void Dispose() => _modelClient.Dispose();
@@ -256,6 +373,15 @@ public class McpSessionRecoveryTests
             "[]"
         ]);
         public List<JsonElement> Inputs { get; } = [];
+
+        public void SetOutputs(params string[] outputs)
+        {
+            _outputs.Clear();
+            foreach (var output in outputs)
+            {
+                _outputs.Enqueue(output);
+            }
+        }
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
@@ -279,7 +405,8 @@ public class McpSessionRecoveryTests
         public IMcpClient? CurrentClient { get; set; }
         public HttpTransportMode Mode { get; init; } = HttpTransportMode.AutoDetect;
         public bool IssueSessionId { get; init; } = true;
-        public bool ReturnToolError { get; init; }
+        public bool ReturnToolError { get; set; }
+        public JsonNode? StartResultOverride { get; set; }
         public string? FailureOperation { get; init; }
         public HttpStatusCode FailureStatus { get; init; } = HttpStatusCode.NotFound;
         public int FailuresRemaining { get; set; } = 1;
@@ -346,13 +473,17 @@ public class McpSessionRecoveryTests
             }
             else if (method == "tools/list")
             {
-                var names = scoped is null ? new[] { Start, End } : ["clipboard_read"];
+                var names = scoped is null ? new[] { Start, End, Details } : ["clipboard_read"];
                 result = JsonSerializer.SerializeToNode(new
                 {
                     tools = names.Select(name => new { name, inputSchema = new { type = "object", properties = new { } } })
                 })!;
             }
-            else if (operation == "take_screenshot")
+            else if (operation == Start && StartResultOverride is not null)
+            {
+                result = StartResultOverride.DeepClone();
+            }
+            else if (operation == "take_screenshot" && !ReturnToolError)
             {
                 result = JsonNode.Parse("""{"content":[{"type":"image","data":"AQID","mimeType":"image/png"}]}""")!;
             }
@@ -365,7 +496,7 @@ public class McpSessionRecoveryTests
                     {
                         type = "text",
                         text = ReturnToolError ? "404 Cloud PC not found"
-                            : operation == Start ? JsonSerializer.Serialize(new { sessionId = CloudPcId }) : "ok"
+                            : operation == Start ? JsonSerializer.Serialize(new { sessionId = CloudPcId, screenShareUrl = ScreenShareUrl }) : "ok"
                     } }
                 })!;
             }

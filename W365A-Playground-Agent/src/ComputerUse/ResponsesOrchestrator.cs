@@ -528,6 +528,7 @@ public sealed class ResponsesOrchestrator
 
         // At most one "Watch live" auto-offer attempt per turn (a failed mint must not spam).
         var screenshareOfferAttempted = false;
+        var checkoutFailed = false;
 
         // Agentic (Teams) turns don't use StreamingResponse — CUA interleaves separate messages and runs
         // long, which makes Teams stop the stream and drop the answer. Send model text as normal messages
@@ -627,9 +628,14 @@ public sealed class ResponsesOrchestrator
                 break;
             }
 
+            var successfulCuaSessions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var call in functionCalls)
             {
                 var name = call.GetProperty("name").GetString()!;
+                if (string.Equals(name, W365StartSessionToolName, StringComparison.OrdinalIgnoreCase))
+                {
+                    checkoutFailed = true;
+                }
                 var callId = call.GetProperty("call_id").GetString()!;
                 var argumentsJson = call.TryGetProperty("arguments", out var argsEl) ? argsEl.GetString() ?? "{}" : "{}";
 
@@ -727,6 +733,19 @@ public sealed class ResponsesOrchestrator
                     }
 
                     var toolSucceeded = outcome == ToolCallOutcome.CompletedSuccess;
+                    if (toolSucceeded)
+                    {
+                        if (string.Equals(name, W365StartSessionToolName, StringComparison.OrdinalIgnoreCase))
+                        {
+                            checkoutFailed = false;
+                        }
+                        if ((W365LifecycleToolNames.Contains(name) || W365SupplementaryDesktopTools.Contains(name))
+                            && !string.Equals(name, W365EndSessionToolName, StringComparison.OrdinalIgnoreCase)
+                            && state.W365SessionId is { } successfulSession)
+                        {
+                            successfulCuaSessions.Add(successfulSession);
+                        }
+                    }
                     var toolOutcome = toolSucceeded
                         ? "success"
                         : outcome == ToolCallOutcome.Mcp401
@@ -754,11 +773,15 @@ public sealed class ResponsesOrchestrator
             // Process computer_call items serially (UI state is sequential).
             foreach (var call in computerCalls)
             {
-                await HandleComputerCallAsync(state, sessionRecovery, history, call, turnContext, agent365Turn, cancellationToken);
+                if (await HandleComputerCallAsync(state, sessionRecovery, history, call, turnContext, agent365Turn, cancellationToken)
+                    && state.W365SessionId is { } successfulSession)
+                {
+                    successfulCuaSessions.Add(successfulSession);
+                }
             }
 
-            // Aggressive auto-(re)offer of the "Watch live" card: if this iteration did any CUA work
-            // (StartSession, a W365 supplementary desktop tool, or a native computer_call) and the
+            // Auto-(re)offer only after successful CUA work on the selected session. A failed
+            // checkout suppresses offers for the turn unless a subsequent checkout succeeds. If the
             // selected session has NO live/redeemable card, send a fresh one so the hirer can always
             // watch — including after they closed/stopped a prior view or let an offer expire. Bounded
             // to one attempt per turn so a failing mint (e.g. unresolved hirer) can't spam.
@@ -771,12 +794,10 @@ public sealed class ResponsesOrchestrator
                 var endedSession = functionCalls.Any(fc => fc.TryGetProperty("name", out var n)
                     && string.Equals(n.GetString(), W365EndSessionToolName, StringComparison.OrdinalIgnoreCase));
 
-                var cuaActivity = computerCalls.Count > 0
-                    || functionCalls.Any(fc => fc.TryGetProperty("name", out var n) && n.GetString() is { } nm
-                        && (W365LifecycleToolNames.Contains(nm) || W365SupplementaryDesktopTools.Contains(nm)));
                 if (!endedSession
-                    && cuaActivity
+                    && !checkoutFailed
                     && state.W365SessionId is { } offSid
+                    && successfulCuaSessions.Contains(offSid)
                     && state.SessionScreenShareUrls.TryGetValue(offSid, out var offUrl)
                     && !_ticketStore.HasRedeemableTicket(offSid))
                 {
@@ -960,11 +981,25 @@ public sealed class ResponsesOrchestrator
             return ToolCallOutcome.CompletedFailure;
         }
 
-        RecordToolTelemetry(success: true);
+        var isMcpError = result is CallToolResponse { IsError: true }
+            || result is JsonElement { ValueKind: JsonValueKind.Object } json
+                && json.TryGetProperty("isError", out var errorFlag)
+                && errorFlag.ValueKind == JsonValueKind.True;
+        var succeeded = !isMcpError
+            && (!string.Equals(func.Name, W365StartSessionToolName, StringComparison.OrdinalIgnoreCase)
+                || !string.IsNullOrWhiteSpace(TryExtractSessionIdFromResult(result)));
+        RecordToolTelemetry(success: succeeded);
 
         // W365 lifecycle post-processing: track/remove sessions in the conversation's
         // multi-slot session set based on which lifecycle tool just ran.
-        await UpdateW365SessionFromResult(state, sessionRecovery, func.Name, args, result, agent365Turn, cancellationToken);
+        if (!isMcpError)
+        {
+            await UpdateW365SessionFromResult(state, sessionRecovery, func.Name, args, result, agent365Turn, cancellationToken);
+        }
+        else
+        {
+            _logger.LogWarning("Tool '{Name}' returned an MCP tool error; Cloud PC session state is unchanged.", func.Name);
+        }
 
         _turnScopes.CurrentTurn?.SetSessionId(state.W365SessionId);
         _turnScopes.CurrentTurn?.SetSessionCount(state.W365SessionIds.Count);
@@ -1007,7 +1042,7 @@ public sealed class ResponsesOrchestrator
             history.Add(MakeFunctionCallOutput(callId, modelResult));
         }
 
-        return ToolCallOutcome.CompletedSuccess;
+        return succeeded ? ToolCallOutcome.CompletedSuccess : ToolCallOutcome.CompletedFailure;
     }
 
     /// <summary>
@@ -1019,7 +1054,7 @@ public sealed class ResponsesOrchestrator
     /// paired output (placeholder PNG) so the next Responses API call doesn't reject the
     /// turn with "computer_call provided without its required output" — a hard API constraint.
     /// </summary>
-    private async Task HandleComputerCallAsync(
+    private async Task<bool> HandleComputerCallAsync(
         ConversationState state,
         McpSessionRecovery sessionRecovery,
         List<JsonElement> history,
@@ -1034,7 +1069,7 @@ public sealed class ResponsesOrchestrator
         {
             history.Add(MakeComputerCallOutput(callId, PlaceholderPngBase64));
             history.Add(MakeUserTextMessage(new McpSessionRecoveryException().Message));
-            return;
+            return false;
         }
 
         // No active W365 session — model jumped to computer_call without StartSession. Append
@@ -1058,7 +1093,7 @@ public sealed class ResponsesOrchestrator
                     ? "No active W365 session. Call mcp_W365ComputerUse_StartSession first, then retry the desktop action."
                     : "The MCP connection is unavailable. Keep the existing Cloud PC session; do not create a replacement."));
             unavailableTelemetry?.Complete(false, 0, false, null, "session_unavailable");
-            return;
+            return false;
         }
 
         _turnScopes.CurrentTurn?.SetSessionId(state.W365SessionId);
@@ -1092,12 +1127,13 @@ public sealed class ResponsesOrchestrator
             _logger.LogWarning("HandleComputerCallAsync (callId={CallId}): no action/actions field — emitting placeholder.", callId);
             history.Add(MakeComputerCallOutput(callId, PlaceholderPngBase64));
             missingActionTelemetry?.Complete(false, 0, false, null, "action_missing");
-            return;
+            return false;
         }
 
         string? finalScreenshotB64 = null;
         string finalScreenshotMime = "image/png";
         bool lastActionWasScreenshot = false;
+        var successfulOperation = false;
 
         var actionIndex = 0;
         foreach (var action in actionList)
@@ -1124,6 +1160,7 @@ public sealed class ResponsesOrchestrator
                 try
                 {
                     var ss = await CaptureScreenshotAsync(state, sessionRecovery, cancellationToken).ConfigureAwait(false);
+                    successfulOperation |= ss is not null;
                     finalScreenshotB64 = ss?.Base64;
                     finalScreenshotMime = ss?.MimeType ?? "image/png";
                     lastActionWasScreenshot = true;
@@ -1207,16 +1244,23 @@ public sealed class ResponsesOrchestrator
                 _logger.LogInformation(
                     "computer_call → MCP '{Tool}' (callId={CallId}, argKeys=[{Keys}])",
                     toolName, callId, string.Join(",", args.Keys));
-                await sessionRecovery.ExecuteAsync(toolName, async ct =>
+                var actionResult = await sessionRecovery.ExecuteAsync(toolName, async ct =>
                 {
                     var client = state.W365McpClient
                         ?? throw new InvalidOperationException("W365 MCP connection is unavailable.");
                     return await client.CallToolAsync(toolName, args, cancellationToken: ct).ConfigureAwait(false);
                 }, cancellationToken).ConfigureAwait(false);
                 lastActionWasScreenshot = false;
+                var actionSucceeded = actionResult.IsError != true;
+                successfulOperation |= actionSucceeded;
+                if (!actionSucceeded)
+                {
+                    _logger.LogWarning("computer_call tool '{Tool}' returned an MCP tool error (callId={CallId}).", toolName, callId);
+                    history.Add(MakeUserTextMessage($"Computer action '{toolName}' returned an MCP tool error."));
+                }
                 _turnScopes.CurrentTurn?.RecordToolCall(W365ComputerUseServerName, toolName, ToolKind.CuaDesktopControl,
-                    success: true, System.Diagnostics.Stopwatch.GetElapsedTime(actStart).TotalMilliseconds);
-                actionTelemetry?.Complete(true, 0, false, null, "success");
+                    success: actionSucceeded, System.Diagnostics.Stopwatch.GetElapsedTime(actStart).TotalMilliseconds);
+                actionTelemetry?.Complete(actionSucceeded, 0, false, null, actionSucceeded ? "success" : "tool_failed");
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -1257,6 +1301,7 @@ public sealed class ResponsesOrchestrator
             try
             {
                 var ss = await CaptureScreenshotAsync(state, sessionRecovery, cancellationToken).ConfigureAwait(false);
+                successfulOperation |= ss is not null;
                 if (ss is not null)
                 {
                     finalScreenshotB64 = ss.Value.Base64;
@@ -1296,7 +1341,7 @@ public sealed class ResponsesOrchestrator
                 "HandleComputerCallAsync (callId={CallId}): no screenshot bytes extracted from any action; emitting 1x1 placeholder. User will see NO image attached.",
                 callId);
             history.Add(MakeComputerCallOutput(callId, PlaceholderPngBase64));
-            return;
+            return successfulOperation && !sessionRecovery.IsUnavailable;
         }
 
         await state.ScreenshotDelivery.SendAsync(
@@ -1304,6 +1349,7 @@ public sealed class ResponsesOrchestrator
             isComputerUseScreenshot: true, cancellationToken: cancellationToken);
 
         history.Add(MakeComputerCallOutput(callId, finalScreenshotB64, finalScreenshotMime));
+        return successfulOperation && !sessionRecovery.IsUnavailable;
     }
 
     /// <summary>
@@ -1456,6 +1502,11 @@ public sealed class ResponsesOrchestrator
         catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.Unauthorized)
         {
             TryHandleMcp401(ex, state);
+            return null;
+        }
+        if (result.IsError == true)
+        {
+            _logger.LogWarning("CaptureScreenshotAsync returned an MCP tool error for session {SessionId}.", state.W365SessionId);
             return null;
         }
         var extracted = ExtractBase64FromResult(result);

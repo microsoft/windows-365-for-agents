@@ -96,9 +96,9 @@ internal sealed class McpSessionRecovery(
             catch (Exception retryError)
             {
                 logger.LogWarning(retryError, "MCP404Recovery operation={Operation} outcome=retry-failed.", operationName);
-                if (HasStatus(retryError, HttpStatusCode.Unauthorized))
+                if (!IsSessionNotFound(retryError, getClient()))
                 {
-                    // Keep authentication recovery on the existing, separately bounded path.
+                    // A request failure does not invalidate a successfully initialized session.
                     throw;
                 }
                 IsUnavailable = true;
