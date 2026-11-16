@@ -121,7 +121,7 @@ public sealed class ResponsesOrchestrator
         /// <summary>Set once after the first attempt to reflect <see cref="W365McpClient"/>, success or fail.</summary>
         public bool W365McpClientResolved { get; set; }
 
-        /// <summary>Set on a direct-client 401; consumed next turn to force MCP re-enumeration.</summary>
+        /// <summary>Set on authentication or transport-session loss; consumed to force MCP re-enumeration.</summary>
         public bool ToolRefreshRequested { get; set; }
 
         /// <summary>Maps each active W365 sessionId → its screenShareUrl (captured at StartSession) so the
@@ -392,6 +392,9 @@ public sealed class ResponsesOrchestrator
         CancellationToken cancellationToken)
     {
         state.LastAccessed = DateTime.UtcNow;
+        // Another conversation may have refreshed the shared tool cache since our last turn.
+        state.W365McpClient = null;
+        state.W365McpClientResolved = false;
         EnsureW365McpClient(tools, state);
 
         AIFunction? screenshotDeliveryTool = null;
@@ -501,6 +504,27 @@ public sealed class ResponsesOrchestrator
             state.ToolRefreshRequested = false; // same-turn recovery satisfies any deferred request
             return true;
         }
+
+        var sessionRecovery = new McpSessionRecovery(
+            () => state.W365McpClient,
+            () =>
+            {
+                state.W365McpClient = null;
+                state.W365McpClientResolved = false;
+                state.ToolRefreshRequested = true;
+            },
+            async ct =>
+            {
+                var result = await reacquireTools(ct).ConfigureAwait(false);
+                EnsureW365McpClient(result.Tools, state);
+                BuildToolPlumbing(result.Tools);
+                if (state.W365McpClient is null)
+                {
+                    throw new InvalidOperationException("MCP re-enumeration returned no W365 client.");
+                }
+                state.ToolRefreshRequested = false;
+            },
+            _logger);
 
         // At most one "Watch live" auto-offer attempt per turn (a failed mint must not spam).
         var screenshareOfferAttempted = false;
@@ -637,7 +661,8 @@ public sealed class ResponsesOrchestrator
                     toolKind.ToDimValue());
                 try
                 {
-                    var outcome = await HandleToolCallAsync(state, history, func, callId, argumentsJson, turnContext, agent365Turn, cancellationToken, isFinalAttempt: _max401RetriesPerCall <= 0);
+                    var outcome = await HandleToolCallAsync(state, sessionRecovery, requestedName => toolsByName.GetValueOrDefault(requestedName),
+                        history, func, callId, argumentsJson, turnContext, agent365Turn, cancellationToken, isFinalAttempt: _max401RetriesPerCall <= 0);
 
                     // Reactive MCP 401 recovery: re-enumerate tools (fresh transport token) and retry,
                     // bounded by _max401RetriesPerCall (per call) AND _max401ReacquiresPerTurn (per turn).
@@ -657,7 +682,8 @@ public sealed class ResponsesOrchestrator
                             if (await TryReacquireToolsAsync().ConfigureAwait(false)
                                 && toolsByName.TryGetValue(name, out var freshFunc))
                             {
-                                outcome = await HandleToolCallAsync(state, history, freshFunc, callId, argumentsJson, turnContext, agent365Turn, cancellationToken, isFinalAttempt: isFinal);
+                                outcome = await HandleToolCallAsync(state, sessionRecovery, requestedName => toolsByName.GetValueOrDefault(requestedName),
+                                    history, freshFunc, callId, argumentsJson, turnContext, agent365Turn, cancellationToken, isFinalAttempt: isFinal);
                                 if (outcome != ToolCallOutcome.Mcp401)
                                 {
                                     recovered = true;
@@ -728,7 +754,7 @@ public sealed class ResponsesOrchestrator
             // Process computer_call items serially (UI state is sequential).
             foreach (var call in computerCalls)
             {
-                await HandleComputerCallAsync(state, history, call, turnContext, agent365Turn, cancellationToken);
+                await HandleComputerCallAsync(state, sessionRecovery, history, call, turnContext, agent365Turn, cancellationToken);
             }
 
             // Aggressive auto-(re)offer of the "Watch live" card: if this iteration did any CUA work
@@ -828,6 +854,8 @@ public sealed class ResponsesOrchestrator
     /// </summary>
     private async Task<ToolCallOutcome> HandleToolCallAsync(
         ConversationState state,
+        McpSessionRecovery sessionRecovery,
+        Func<string, AIFunction?> resolveTool,
         List<JsonElement> history,
         AIFunction func,
         string callId,
@@ -862,7 +890,7 @@ public sealed class ResponsesOrchestrator
         //     a previous conversation). StartSession is exempt — it never takes sessionId.
         if (!string.Equals(func.Name, W365StartSessionToolName, StringComparison.OrdinalIgnoreCase))
         {
-            var (switchOk, switchErr) = await ValidateAndMaybeSwitchSessionAsync(state, args, func.Name, cancellationToken).ConfigureAwait(false);
+            var (switchOk, switchErr) = await ValidateAndMaybeSwitchSessionAsync(state, sessionRecovery, args, func.Name, cancellationToken).ConfigureAwait(false);
             if (!switchOk)
             {
                 _logger.LogWarning("Tool '{Name}' BLOCKED by session validator (callId={CallId}): {Err}", func.Name, callId, switchErr);
@@ -885,7 +913,20 @@ public sealed class ResponsesOrchestrator
 
         try
         {
-            result = await func.InvokeAsync(new AIFunctionArguments(args), cancellationToken);
+            if (func is McpClientTool or W365DesktopTool
+                && (W365LifecycleToolNames.Contains(func.Name) || W365SupplementaryDesktopTools.Contains(func.Name)))
+            {
+                result = await sessionRecovery.ExecuteAsync(func.Name, async ct =>
+                {
+                    var current = resolveTool(func.Name)
+                        ?? throw new InvalidOperationException($"Tool '{func.Name}' is unavailable after MCP re-enumeration.");
+                    return await current.InvokeAsync(new AIFunctionArguments(args), ct).ConfigureAwait(false);
+                }, cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                result = await func.InvokeAsync(new AIFunctionArguments(args), cancellationToken);
+            }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -923,7 +964,7 @@ public sealed class ResponsesOrchestrator
 
         // W365 lifecycle post-processing: track/remove sessions in the conversation's
         // multi-slot session set based on which lifecycle tool just ran.
-        await UpdateW365SessionFromResult(state, func.Name, args, result, agent365Turn, cancellationToken);
+        await UpdateW365SessionFromResult(state, sessionRecovery, func.Name, args, result, agent365Turn, cancellationToken);
 
         _turnScopes.CurrentTurn?.SetSessionId(state.W365SessionId);
         _turnScopes.CurrentTurn?.SetSessionCount(state.W365SessionIds.Count);
@@ -980,6 +1021,7 @@ public sealed class ResponsesOrchestrator
     /// </summary>
     private async Task HandleComputerCallAsync(
         ConversationState state,
+        McpSessionRecovery sessionRecovery,
         List<JsonElement> history,
         JsonElement call,
         ITurnContext turnContext,
@@ -987,6 +1029,13 @@ public sealed class ResponsesOrchestrator
         CancellationToken cancellationToken)
     {
         var callId = call.GetProperty("call_id").GetString()!;
+
+        if (sessionRecovery.IsUnavailable)
+        {
+            history.Add(MakeComputerCallOutput(callId, PlaceholderPngBase64));
+            history.Add(MakeUserTextMessage(new McpSessionRecoveryException().Message));
+            return;
+        }
 
         // No active W365 session — model jumped to computer_call without StartSession. Append
         // a placeholder screenshot output (API requires paired output) plus a corrective
@@ -1005,7 +1054,9 @@ public sealed class ResponsesOrchestrator
                 callId);
             history.Add(MakeComputerCallOutput(callId, PlaceholderPngBase64));
             history.Add(MakeUserTextMessage(
-                "No active W365 session. Call mcp_W365ComputerUse_StartSession first, then retry the desktop action."));
+                string.IsNullOrEmpty(state.W365SessionId)
+                    ? "No active W365 session. Call mcp_W365ComputerUse_StartSession first, then retry the desktop action."
+                    : "The MCP connection is unavailable. Keep the existing Cloud PC session; do not create a replacement."));
             unavailableTelemetry?.Complete(false, 0, false, null, "session_unavailable");
             return;
         }
@@ -1072,7 +1123,7 @@ public sealed class ResponsesOrchestrator
                 var ssStart = System.Diagnostics.Stopwatch.GetTimestamp();
                 try
                 {
-                    var ss = await CaptureScreenshotAsync(state, cancellationToken).ConfigureAwait(false);
+                    var ss = await CaptureScreenshotAsync(state, sessionRecovery, cancellationToken).ConfigureAwait(false);
                     finalScreenshotB64 = ss?.Base64;
                     finalScreenshotMime = ss?.MimeType ?? "image/png";
                     lastActionWasScreenshot = true;
@@ -1097,6 +1148,12 @@ public sealed class ResponsesOrchestrator
                         success: false, System.Diagnostics.Stopwatch.GetElapsedTime(ssStart).TotalMilliseconds);
                     _logger.LogWarning(ex,
                         "computer_call screenshot action failed (callId={CallId}); will pair with placeholder.", callId);
+                    if (sessionRecovery.IsUnavailable)
+                    {
+                        finalScreenshotB64 = null;
+                        history.Add(MakeUserTextMessage(ex.Message));
+                        break;
+                    }
                 }
                 continue;
             }
@@ -1150,8 +1207,12 @@ public sealed class ResponsesOrchestrator
                 _logger.LogInformation(
                     "computer_call → MCP '{Tool}' (callId={CallId}, argKeys=[{Keys}])",
                     toolName, callId, string.Join(",", args.Keys));
-                await state.W365McpClient.CallToolAsync(toolName, args, cancellationToken: cancellationToken)
-                    .ConfigureAwait(false);
+                await sessionRecovery.ExecuteAsync(toolName, async ct =>
+                {
+                    var client = state.W365McpClient
+                        ?? throw new InvalidOperationException("W365 MCP connection is unavailable.");
+                    return await client.CallToolAsync(toolName, args, cancellationToken: ct).ConfigureAwait(false);
+                }, cancellationToken).ConfigureAwait(false);
                 lastActionWasScreenshot = false;
                 _turnScopes.CurrentTurn?.RecordToolCall(W365ComputerUseServerName, toolName, ToolKind.CuaDesktopControl,
                     success: true, System.Diagnostics.Stopwatch.GetElapsedTime(actStart).TotalMilliseconds);
@@ -1171,14 +1232,20 @@ public sealed class ResponsesOrchestrator
                 _logger.LogWarning(ex,
                     "computer_call MCP dispatch failed: action='{ActionType}' tool='{Tool}' (callId={CallId}).",
                     actionType, toolName, callId);
-                // Don't break — try remaining actions and still emit a paired output below.
+                // Stop on exhausted session recovery; other errors retain best-effort behavior.
                 lastActionWasScreenshot = false;
+                if (sessionRecovery.IsUnavailable)
+                {
+                    finalScreenshotB64 = null;
+                    history.Add(MakeUserTextMessage(ex.Message));
+                    break;
+                }
             }
         }
 
         // Capture the post-action screenshot unless the model's last action was already a
         // screenshot (in which case finalScreenshotB64 is already populated).
-        if (!lastActionWasScreenshot)
+        if (!lastActionWasScreenshot && !sessionRecovery.IsUnavailable)
         {
             using var postScreenshotTelemetry = agent365Turn?.StartTool(
                 "take_screenshot",
@@ -1189,7 +1256,7 @@ public sealed class ResponsesOrchestrator
                 ToolKind.CuaDesktopControl.ToDimValue());
             try
             {
-                var ss = await CaptureScreenshotAsync(state, cancellationToken).ConfigureAwait(false);
+                var ss = await CaptureScreenshotAsync(state, sessionRecovery, cancellationToken).ConfigureAwait(false);
                 if (ss is not null)
                 {
                     finalScreenshotB64 = ss.Value.Base64;
@@ -1212,6 +1279,11 @@ public sealed class ResponsesOrchestrator
                 postScreenshotTelemetry?.RecordFailure(ex, "screenshot_failed");
                 _logger.LogWarning(ex,
                     "Post-action screenshot failed (callId={CallId}); pairing with placeholder.", callId);
+                if (sessionRecovery.IsUnavailable)
+                {
+                    finalScreenshotB64 = null;
+                    history.Add(MakeUserTextMessage(ex.Message));
+                }
             }
         }
 
@@ -1363,7 +1435,7 @@ public sealed class ResponsesOrchestrator
     /// <c>computer_call_output</c>, and by the post-StartSession initial-screenshot hook.
     /// </summary>
     private async Task<(string Base64, string MimeType)?> CaptureScreenshotAsync(
-        ConversationState state, CancellationToken cancellationToken)
+        ConversationState state, McpSessionRecovery sessionRecovery, CancellationToken cancellationToken)
     {
         if (state.W365McpClient is null || string.IsNullOrEmpty(state.W365SessionId))
         {
@@ -1374,8 +1446,12 @@ public sealed class ResponsesOrchestrator
         CallToolResponse result;
         try
         {
-            result = await state.W365McpClient.CallToolAsync("take_screenshot", args, cancellationToken: cancellationToken)
-                .ConfigureAwait(false);
+            result = await sessionRecovery.ExecuteAsync("take_screenshot", async ct =>
+            {
+                var client = state.W365McpClient
+                    ?? throw new InvalidOperationException("W365 MCP connection is unavailable.");
+                return await client.CallToolAsync("take_screenshot", args, cancellationToken: ct).ConfigureAwait(false);
+            }, cancellationToken).ConfigureAwait(false);
         }
         catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.Unauthorized)
         {
@@ -1792,6 +1868,10 @@ public sealed class ResponsesOrchestrator
     /// </summary>
     private bool TryHandleMcp401(Exception ex, ConversationState state, [CallerMemberName] string? caller = null)
     {
+        if (ex is McpSessionRecoveryException)
+        {
+            return false;
+        }
         // Walk the exception chain — the MCP SDK may wrap the underlying 401.
         for (Exception? e = ex; e is not null; e = e.InnerException)
         {
@@ -1811,7 +1891,7 @@ public sealed class ResponsesOrchestrator
 
     /// <summary>
     /// Consumes a pending deferred tool-refresh request for <paramref name="conversationKey"/>
-    /// (set by a prior direct-client 401). Returns <c>true</c> if the caller should force MCP
+    /// (set by prior authentication or transport-session loss). Returns <c>true</c> if the caller should force MCP
     /// re-enumeration this turn; resets the flag so it fires exactly once.
     /// </summary>
     public bool ConsumeToolRefreshRequest(string conversationKey)
@@ -1819,7 +1899,7 @@ public sealed class ResponsesOrchestrator
         if (_conversations.TryGetValue(conversationKey, out var state) && state.ToolRefreshRequested)
         {
             state.ToolRefreshRequested = false;
-            _logger.LogInformation("Consuming deferred tool-refresh for {Key} (direct-client 401 recovery) — forcing re-enumeration.", conversationKey);
+            _logger.LogInformation("Consuming deferred MCP tool-refresh for {Key} — forcing re-enumeration.", conversationKey);
             return true;
         }
         return false;
@@ -1975,6 +2055,7 @@ public sealed class ResponsesOrchestrator
     /// </summary>
     private async Task<(bool Ok, string? ErrorMessage)> ValidateAndMaybeSwitchSessionAsync(
         ConversationState state,
+        McpSessionRecovery sessionRecovery,
         IDictionary<string, object?> args,
         string toolName,
         CancellationToken ct)
@@ -2006,7 +2087,7 @@ public sealed class ResponsesOrchestrator
                 toolName, previousSelected, argSessionId, state.W365SessionIds.Count);
             try
             {
-                await RefreshW365DesktopToolsAsync(state, ct).ConfigureAwait(false);
+                await RefreshW365DesktopToolsAsync(state, sessionRecovery, ct).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -2037,6 +2118,7 @@ public sealed class ResponsesOrchestrator
     /// </summary>
     private async Task UpdateW365SessionFromResult(
         ConversationState state,
+        McpSessionRecovery sessionRecovery,
         string toolName,
         IDictionary<string, object?> args,
         object? result,
@@ -2092,7 +2174,7 @@ public sealed class ResponsesOrchestrator
                 // gateway's desktop-tool catalog. Fire-and-await: small extra round-trip cost
                 // (~150 ms) on the StartSession turn, but lets B.4 trust the catalog is populated
                 // by the time the next user message arrives.
-                await RefreshW365DesktopToolsAsync(state, cancellationToken);
+                await RefreshW365DesktopToolsAsync(state, sessionRecovery, cancellationToken);
 
                 // Capture an initial screenshot right after StartSession so the
                 // model's NEXT turn (the one that uses the newly-active session) already has
@@ -2108,7 +2190,7 @@ public sealed class ResponsesOrchestrator
                     ToolKind.CuaDesktopControl.ToDimValue());
                 try
                 {
-                    var initial = await CaptureScreenshotAsync(state, cancellationToken).ConfigureAwait(false);
+                    var initial = await CaptureScreenshotAsync(state, sessionRecovery, cancellationToken).ConfigureAwait(false);
                     if (initial is { } init)
                     {
                         _logger.LogInformation(
@@ -2215,7 +2297,8 @@ public sealed class ResponsesOrchestrator
     /// <see cref="JsonRpcRequest"/>. Failures are swallowed (logged at Warning) — the lifecycle
     /// tools still work; only the desktop catalog feature is degraded.
     /// </summary>
-    private async Task RefreshW365DesktopToolsAsync(ConversationState state, CancellationToken ct)
+    private async Task RefreshW365DesktopToolsAsync(
+        ConversationState state, McpSessionRecovery sessionRecovery, CancellationToken ct)
     {
         if (state.W365McpClient is null)
         {
@@ -2240,7 +2323,17 @@ public sealed class ResponsesOrchestrator
 
         try
         {
-            var resp = await state.W365McpClient.SendRequestAsync(req, ct).ConfigureAwait(false);
+            var resp = await sessionRecovery.ExecuteAsync("tools/list", async token =>
+            {
+                var client = state.W365McpClient
+                    ?? throw new InvalidOperationException("W365 MCP connection is unavailable.");
+                // SendRequestAsync assigns an ID; construct a distinct request for a retry.
+                return await client.SendRequestAsync(new JsonRpcRequest
+                {
+                    Method = req.Method,
+                    Params = paramsNode.DeepClone()
+                }, token).ConfigureAwait(false);
+            }, ct).ConfigureAwait(false);
 
             // JsonRpcResponse.Result is a JsonNode (per SDK 0.2.0-preview.3). Deserialize into
             // the typed ListToolsResult so we can enumerate Tools without further parsing.
@@ -2277,6 +2370,10 @@ public sealed class ResponsesOrchestrator
             _logger.LogInformation(
                 "RefreshW365DesktopToolsAsync: gateway returned {Count} session-scoped tool(s) for sessionId {SessionId}.",
                 catalog.Tools.Count, state.W365SessionId);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
