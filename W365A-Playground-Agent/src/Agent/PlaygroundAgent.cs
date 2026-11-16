@@ -454,8 +454,8 @@ public class PlaygroundAgent : AgentApplication
                 var refreshRequested = _orchestrator.ConsumeToolRefreshRequest(conversationKey);
                 var tools = await GetToolsAsync(turnContext, turnState, authHandlerName, forceRefresh: refreshRequested);
                 var displayName = turnContext.Activity.From?.Name;
-                // Reactive recovery: re-enumerate MCP tools with a fresh transport token if a tool
-                // call hits a 401 mid-turn, surfacing whether the token was actually refreshed (Signal 2).
+                // Re-enumeration replaces cached tools and their MCP transports for both
+                // authentication and transport-session recovery.
                 Func<CancellationToken, Task<ToolReacquireResult>> reacquireTools = async ct =>
                 {
                     ct.ThrowIfCancellationRequested();
@@ -572,12 +572,11 @@ public class PlaygroundAgent : AgentApplication
                 }
                 else
                 {
-                    // Cache miss or forced (401 recovery): drop any existing entry so we
-                    // re-enumerate with a fresh transport token.
+                    // Drop cached wrappers so re-enumeration creates fresh MCP transports.
                     if (_agentToolCache.TryRemove(toolCacheKey, out _))
                     {
                         _logger.LogInformation("Tool cache evicted for re-enumeration (key={Key}, reason={Reason}).",
-                            toolCacheKey, forceRefresh ? "forceRefresh(401)" : "cache-miss-or-empty");
+                            toolCacheKey, forceRefresh ? "forceRefresh" : "cache-miss-or-empty");
                     }
 
                     // Signal 2: did this forced re-enumeration mint a fresh token?
@@ -594,7 +593,7 @@ public class PlaygroundAgent : AgentApplication
 
                             _lastTokenExpByCacheKey[toolCacheKey] = exp;
                         }
-                        _logger.LogInformation("MCP401Classification-Signal2 key={Key} tokenRefreshed={Refreshed}.",
+                        _logger.LogInformation("MCPToolRefresh key={Key} tokenRefreshed={Refreshed}.",
                             toolCacheKey, _lastForceRefreshTokenRefreshed?.ToString() ?? "unknown");
                     }
 
