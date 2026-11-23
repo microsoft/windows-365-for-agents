@@ -1,0 +1,6 @@
+{
+  "Throttling__MessagesPerMinute": "300",
+  "Throttling__UserBurst__Enabled": "true",
+  "Throttling__UserBurst__TokensPerMinute": "5",
+  "Throttling__UserBurst__BurstCapacity": "2"
+}

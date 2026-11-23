@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using System.Reflection;
+using System.Threading.RateLimiting;
 
 using Microsoft.Agents.A365.Observability.Extensions.AgentFramework;
 using Microsoft.Agents.A365.Observability.Hosting.Caching;
@@ -17,6 +18,7 @@ using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Identity.Web;
+using Microsoft.Extensions.Options;
 using Microsoft.W365APlaygroundAgent.Agent;
 using Microsoft.W365APlaygroundAgent.Auth;
 using Microsoft.W365APlaygroundAgent.ComputerUse;
@@ -59,6 +61,11 @@ builder.Services.AddSingleton<IMcpToolServerConfigurationService, McpToolServerC
 // across the (transient) PlaygroundAgent instances. For multi-instance production, back this with
 // a distributed store (AzureTableStorage or Redis) so counts are shared across instances.
 builder.Services.AddSingleton<IUserTurnLimiter, UserTurnLimiter>();
+var throttling = builder.Configuration.GetSection(ThrottlingOptions.SectionName)
+    .Get<ThrottlingOptions>() ?? new ThrottlingOptions();
+throttling.Validate();
+builder.Services.AddSingleton<IOptions<ThrottlingOptions>>(Options.Create(throttling));
+builder.Services.AddSingleton<IUserBurstLimiter, UserBurstLimiter>();
 
 // Screenshare (Computer-See/Control): in-memory ticket store, singleton so tickets are shared
 // across the (transient) agent instances. State resets on restart (see IScreenshareTicketStore).
@@ -68,17 +75,12 @@ builder.Services.AddSingleton<ScreenshareService>();
 builder.Services.AddSingleton<IHirerResolver, GraphHirerResolver>();
 builder.Services.AddSingleton<IScreenshareIssuer, ScreenshareIssuer>();
 
-// Global HTTP rate limit on /api/messages: 5 req/min across all callers, no queueing.
-// Conservative ceiling for a demo agent — returns 429 immediately on overflow. To raise
-// it for your own workload, edit the constants below (PermitLimit / Window).
+// One process-local ingress bucket across all callers. Defaults to 5/minute;
+// Throttling:MessagesPerMinute can raise a deployment's ceiling. No request queue.
 builder.Services.AddRateLimiter(options =>
 {
-    options.AddFixedWindowLimiter("messagesGlobal", o =>
-    {
-        o.PermitLimit = 5;
-        o.Window = TimeSpan.FromMinutes(1);
-        o.QueueLimit = 0;
-    });
+    options.AddPolicy("messagesGlobal", context =>
+        RateLimitPartition.GetFixedWindowLimiter("messagesGlobal", key => throttling.CreateIngressOptions()));
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
 });
 

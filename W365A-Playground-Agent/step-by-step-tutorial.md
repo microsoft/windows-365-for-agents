@@ -461,21 +461,28 @@ Full walkthrough with screenshots: [Create an agent instance](https://learn.micr
 
 ## Throttling — operational notes
 
-The two throttling gates (HTTP rate limit + per-user turn quota) are described at-a-glance in the README. Two operational details matter when running the agent in production:
+The HTTP rate limit, optional per-caller burst limit, and per-user turn quota are described in the [README](README.md#throttling).
 
 ### Caveats
 
 - **In-memory state.** The per-user quota resets when the App Service restarts — anyone over the cap is unblocked. For a multi-instance production deployment, replace `UserTurnLimiter` with one backed by AzureTableStorage or Redis so per-user counts are shared across instances.
-- **Quota response is a text reply, not HTTP 429.** Only the global rate limiter returns 429. The quota gate sends a human-readable message back through Teams.
+- **Quota and burst responses are text replies, not HTTP 429.** Only the ingress rate limiter returns 429. Burst rejection occurs before charging the daily quota.
+- **Burst limits are per caller, not per IP.** The optional token bucket uses the same identity as the daily quota. Both caller-level gates skip when caller identity is unavailable or `BEARER_TOKEN` development mode is used; HTTP admission remains enforced.
 
 ### Tuning
 
-The defaults below are intentionally conservative for a demo agent. To raise either limit for your own workload, edit the constants directly in code — there are no `appsettings.json` entries:
+The defaults remain conservative for a demo agent. Ingress and burst options are
+read from configuration at startup; the daily quota remains a code constant.
+The [workshop example](config/workshop.settings.example.json) is not loaded or
+deployed automatically. Applying settings requires separate authorization and a restart.
 
 | Setting | Where | Default |
 |---|---|---|
-| Global permit limit (req/window) | `Program.cs` → `o.PermitLimit` | `5` |
-| Global window | `Program.cs` → `o.Window` | `1 min` |
+| Global permit limit (req/window) | `Throttling:MessagesPerMinute` | `5` |
+| Global window | `ThrottlingOptions.CreateIngressOptions` | `1 min` |
+| Caller burst enabled | `Throttling:UserBurst:Enabled` | `false` |
+| Caller refill rate | `Throttling:UserBurst:TokensPerMinute` | `5` |
+| Caller burst capacity | `Throttling:UserBurst:BurstCapacity` | `2` |
 | Per-user turn cap | `Throttling/UserTurnLimiter.cs` → `MaxTurnsPerWindow` | `100` |
 | Per-user window | `Throttling/UserTurnLimiter.cs` → `WindowHours` | `24` |
 
