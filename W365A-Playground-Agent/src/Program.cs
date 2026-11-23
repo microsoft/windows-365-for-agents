@@ -178,10 +178,7 @@ if (app.Environment.IsDevelopment())
     app.UseDeveloperExceptionPage();
 }
 
-app.UseRouting();
-app.UseRateLimiter();
-app.UseAuthentication();
-app.UseAuthorization();
+Program.ConfigureRequestPipeline(app);
 
 // Map the /api/messages endpoint to the AgentApplication.
 // RequireRateLimiting attaches the "messagesGlobal" policy declared above.
@@ -217,3 +214,14 @@ else
 }
 
 app.Run();
+
+partial class Program
+{
+    internal static void ConfigureRequestPipeline(IApplicationBuilder app)
+    {
+        app.UseRouting();
+        app.UseAuthentication();
+        app.UseAuthorization();
+        app.UseRateLimiter();
+    }
+}
