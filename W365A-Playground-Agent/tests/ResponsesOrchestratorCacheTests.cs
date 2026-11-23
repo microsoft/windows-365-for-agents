@@ -19,6 +19,57 @@ namespace Microsoft.W365APlaygroundAgent.Tests;
 
 public class ResponsesOrchestratorCacheTests
 {
+    [Fact]
+    public async Task ConfiguredCapacityControlsIdleRetention()
+    {
+        using var client = new HttpClient(new EmptyModelHandler());
+        var (orchestrator, cache) = Create(client, total: 3, busyCount: 0, capacity: 2);
+
+        await RunTurnAsync(orchestrator, "new-conversation");
+
+        Assert.Equal(2, cache.Count);
+        Assert.True(cache.Contains("conversation-2"));
+        Assert.True(cache.Contains("new-conversation"));
+    }
+
+    [Fact]
+    public async Task IdleConversationWithTrackedCloudPcSurvivesCapacityPressure()
+    {
+        using var client = new HttpClient(new EmptyModelHandler());
+        var (orchestrator, cache) = Create(client, total: 2, busyCount: 0, capacity: 1);
+        var held = cache["conversation-0"]!;
+        held.GetType().GetMethod("TrackAndSelectSession")!.Invoke(held, ["test-session"]);
+
+        await RunTurnAsync(orchestrator, "new-conversation");
+
+        Assert.Equal(2, cache.Count);
+        Assert.Same(held, cache["conversation-0"]);
+        Assert.False(cache.Contains("conversation-1"));
+        Assert.Equal("test-session", held.GetType().GetProperty("W365SessionId")!.GetValue(held));
+    }
+
+    [Fact]
+    public async Task ConversationBecomesEvictableAfterItsSessionIsRemoved()
+    {
+        using var client = new HttpClient(new EmptyModelHandler());
+        var (orchestrator, cache) = Create(client, total: 1, busyCount: 0, capacity: 1);
+        var held = cache["conversation-0"]!;
+        held.GetType().GetMethod("TrackAndSelectSession")!.Invoke(held, ["test-session"]);
+        held.GetType().GetMethod("RemoveSession")!.Invoke(held, ["test-session"]);
+
+        await RunTurnAsync(orchestrator, "new-conversation");
+
+        Assert.Single(cache);
+        Assert.False(cache.Contains("conversation-0"));
+    }
+
+    [Fact]
+    public void InvalidCapacityFailsAtConstruction()
+    {
+        using var client = new HttpClient(new EmptyModelHandler());
+        Assert.Throws<InvalidOperationException>(() => Create(client, 0, 0, capacity: 0));
+    }
+
     [Theory]
     [InlineData(100)]
     [InlineData(120)]
@@ -84,7 +135,7 @@ public class ResponsesOrchestratorCacheTests
     }
 
     private static (ResponsesOrchestrator Orchestrator, IDictionary Cache) Create(
-        HttpClient client, int total, int busyCount)
+        HttpClient client, int total, int busyCount, int capacity = 100)
     {
         var factory = new Mock<IHttpClientFactory>(MockBehavior.Strict);
         factory.Setup(f => f.CreateClient("WebClient")).Returns(client);
@@ -93,7 +144,8 @@ public class ResponsesOrchestratorCacheTests
             {
                 ["AIServices:AzureOpenAI:Endpoint"] = "https://model.invalid",
                 ["AIServices:AzureOpenAI:DeploymentName"] = "test-model",
-                ["AIServices:AzureOpenAI:ApiKey"] = "test-key"
+                ["AIServices:AzureOpenAI:ApiKey"] = "test-key",
+                ["ConversationState:MaxCachedConversations"] = capacity.ToString(System.Globalization.CultureInfo.InvariantCulture)
             }).Build();
         var orchestrator = new ResponsesOrchestrator(factory.Object, configuration,
             NullLogger<ResponsesOrchestrator>.Instance,

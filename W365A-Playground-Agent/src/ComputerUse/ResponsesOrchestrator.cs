@@ -29,7 +29,7 @@ internal sealed record AgentTurnOutputSummary(int MessageCount, int TextLength);
 
 /// <summary>
 /// Stateless Responses API orchestrator that manages the agentic tool-call loop for each conversation.
-/// Per-conversation history is held in memory, capped at <see cref="MaxConversations"/> entries (LRU eviction).
+/// Per-conversation history is held in memory with configurable soft LRU retention.
 /// Screenshots embedded in tool results are detected, forwarded according to the conversation's Teams preference, and injected
 /// as <c>input_image</c> for the model — then pruned from history after each model call to prevent
 /// base64 accumulation across long CUA sessions.
@@ -270,7 +270,7 @@ public sealed class ResponsesOrchestrator
     private static readonly FieldInfo? McpClientToolClientField =
         typeof(McpClientTool).GetField("_client", BindingFlags.Instance | BindingFlags.NonPublic);
 
-    private const int MaxConversations = 100;
+    private readonly int _maxConversations;
 
     // Reactive MCP 401 recovery bounds (configurable via appsettings ToolCache:*).
     private readonly int _max401RetriesPerCall;
@@ -317,6 +317,11 @@ public sealed class ResponsesOrchestrator
         // Per-call retry and per-turn re-enumeration caps (default 1 each).
         _max401RetriesPerCall = configuration.GetValue("ToolCache:Max401RetriesPerCall", 1);
         _max401ReacquiresPerTurn = configuration.GetValue("ToolCache:Max401ReacquiresPerTurn", 1);
+        _maxConversations = configuration.GetValue("ConversationState:MaxCachedConversations", 100);
+        if (_maxConversations <= 0)
+        {
+            throw new InvalidOperationException("ConversationState:MaxCachedConversations must be positive.");
+        }
     }
 
     /// <summary>
@@ -338,20 +343,24 @@ public sealed class ResponsesOrchestrator
         ConversationState state;
         lock (_conversations)
         {
-            // Keep active and queued turns on the same state; the cap stays soft when all are busy.
-            while (!_conversations.ContainsKey(conversationKey) && _conversations.Count >= MaxConversations)
+            // Never forget tracked Cloud PCs merely because their conversation is between turns.
+            // Reconciliation of externally expired sessions is separate from LRU admission.
+            while (!_conversations.ContainsKey(conversationKey) && _conversations.Count >= _maxConversations)
             {
                 var oldest = _conversations
-                    .Where(kvp => kvp.Value.ActiveOrQueuedTurns == 0)
+                    .Where(kvp => kvp.Value.ActiveOrQueuedTurns == 0 && kvp.Value.W365SessionIds.Count == 0)
                     .OrderBy(kvp => kvp.Value.LastAccessed)
                     .FirstOrDefault();
                 if (oldest.Value is null)
                 {
+                    _logger.LogWarning(
+                        "Conversation cache soft cap {Max} reached at {Count}; retaining active/queued turns and tracked Cloud PC sessions.",
+                        _maxConversations, _conversations.Count);
                     break;
                 }
 
                 _conversations.TryRemove(oldest.Key, out _);
-                _logger.LogInformation("Conversation cap reached ({Max}). Evicted: {Key}", MaxConversations, oldest.Key);
+                _logger.LogInformation("Conversation cap reached ({Max}). Evicted: {Key}", _maxConversations, oldest.Key);
             }
 
             state = _conversations.GetOrAdd(conversationKey, _ => new ConversationState());
