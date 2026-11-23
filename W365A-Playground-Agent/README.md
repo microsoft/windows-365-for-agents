@@ -75,6 +75,14 @@ The agent listens on `http://localhost:3978/api/messages`.
 | Throttling | `src/Throttling/` | Per-user turn quota (100 / 24h) + global HTTP rate limit (5 / min) on `/api/messages` |
 | Platform | `Microsoft.Agents.A365.*` | Agent blueprint, MCP tooling, observability |
 
+## MCP credential lifetime
+
+Agentic MCP transports renew expiring credentials without replacing the transport
+or Cloud PC session. Incomplete discovery results are not cached. Explicit bearer
+overrides and non-agentic authentication retain their existing behavior.
+See [MCP credentials and discovery](docs/mcp-credentials.md) for identity boundaries,
+failure behavior, and regression coverage.
+
 ## Teams screenshot preferences
 
 Screenshots are posted to Teams by default. Ask the agent to "stop sending screenshots"

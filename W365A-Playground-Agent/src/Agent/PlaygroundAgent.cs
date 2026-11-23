@@ -12,6 +12,7 @@ using Microsoft.Agents.Builder.State;
 using Microsoft.Agents.Core;
 using Microsoft.Agents.Core.Models;
 using Microsoft.Extensions.AI;
+using Microsoft.W365APlaygroundAgent.Auth;
 using Microsoft.W365APlaygroundAgent.ComputerUse;
 using Microsoft.W365APlaygroundAgent.Screenshare;
 using Microsoft.W365APlaygroundAgent.Telemetry;
@@ -86,8 +87,8 @@ public class PlaygroundAgent : AgentApplication
     private readonly string? _agenticAuthHandlerName;
     private readonly string? _oboAuthHandlerName;
 
-    // Caches MCP tools per user (keyed by GetToolCacheKey). Evicted reactively on a 401
-    // (forceRefresh), which re-mints the static transport token. LRU-capped for memory.
+    // Agentic transports renew their credentials independently of this tool catalog.
+    // Recovery can still replace transports without discarding Cloud PC session IDs.
     private const int MaxToolCacheEntries = 1000;
     private sealed class ToolCacheEntry
     {
@@ -96,40 +97,11 @@ public class PlaygroundAgent : AgentApplication
     }
     private static readonly ConcurrentDictionary<string, ToolCacheEntry> _agentToolCache = new();
 
-    // Signal 2 (401 classification): last agentic-token exp per cache key, to detect whether a
-    // forced re-enumeration minted a fresh token. Carried out via _lastForceRefreshTokenRefreshed.
-    private static readonly ConcurrentDictionary<string, long> _lastTokenExpByCacheKey = new();
-    private bool? _lastForceRefreshTokenRefreshed;
-
     /// <summary>Returns the bearer token from the <c>BEARER_TOKEN</c> environment variable when present (development/testing flow).</summary>
     private static bool TryGetBearerTokenForDevelopment(out string? bearerToken)
     {
         bearerToken = Environment.GetEnvironmentVariable("BEARER_TOKEN");
         return !string.IsNullOrEmpty(bearerToken);
-    }
-
-    /// <summary>Best-effort decode of a JWT's <c>exp</c> claim (Unix seconds). Null if not a JWT.</summary>
-    private static long? TryGetJwtExp(string? token)
-    {
-        if (string.IsNullOrEmpty(token))
-        {
-            return null;
-        }
-
-        try
-        {
-            var parts = token.Split('.');
-            if (parts.Length < 2)
-            {
-                return null;
-            }
-
-            var p = parts[1].Replace('-', '+').Replace('_', '/');
-            switch (p.Length % 4) { case 2: p += "=="; break; case 3: p += "="; break; }
-            using var doc = JsonDocument.Parse(Convert.FromBase64String(p));
-            return doc.RootElement.TryGetProperty("exp", out var e) && e.TryGetInt64(out var exp) ? exp : null;
-        }
-        catch { return null; }
     }
 
     /// <summary>
@@ -403,6 +375,7 @@ public class PlaygroundAgent : AgentApplication
         using var turn = _turnScopes.BeginTurn(turnContext);
         try
         {
+            using var mcpRequest = McpRequestContext.Enter(turnContext);
             // Send an immediate acknowledgment — this arrives as a separate message before the LLM response.
             // Each SendActivityAsync call produces a discrete Teams message, enabling the multiple-messages pattern.
             // NOTE: For Teams agentic identities, streaming is buffered into a single message by the SDK;
@@ -460,7 +433,8 @@ public class PlaygroundAgent : AgentApplication
                 {
                     ct.ThrowIfCancellationRequested();
                     var fresh = await GetToolsAsync(turnContext, turnState, authHandlerName, forceRefresh: true);
-                    return new ToolReacquireResult(fresh, _lastForceRefreshTokenRefreshed);
+                    // Re-enumeration does not establish whether the actual MCP bearer changed.
+                    return new ToolReacquireResult(fresh, null);
                 };
 
                 // Mint-at-offer fires when a Cloud PC session starts so the human can watch during the work.
@@ -521,6 +495,17 @@ public class PlaygroundAgent : AgentApplication
     {
         AssertionHelpers.ThrowIfNull(context, nameof(context));
 
+        if (!forceRefresh && !string.IsNullOrEmpty(authHandlerName)
+            && McpRequestContext.Current?.Identity is { } identity)
+        {
+            var key = GetToolCacheKey(turnState, identity.Agent);
+            if (_agentToolCache.TryGetValue(key, out var tools) && tools.Tools.Count > 0)
+            {
+                tools.LastAccessed = DateTime.UtcNow;
+                return tools.Tools.ToList();
+            }
+        }
+
         // Acquire the access token once for this turn — used for MCP tool loading.
         string? accessToken = null;
         string? agentId = null;
@@ -579,22 +564,9 @@ public class PlaygroundAgent : AgentApplication
                             toolCacheKey, forceRefresh ? "forceRefresh" : "cache-miss-or-empty");
                     }
 
-                    // Signal 2: did this forced re-enumeration mint a fresh token?
                     if (forceRefresh)
                     {
-                        _lastForceRefreshTokenRefreshed = null;
-                        var newExp = TryGetJwtExp(accessToken);
-                        if (newExp is long exp)
-                        {
-                            if (_lastTokenExpByCacheKey.TryGetValue(toolCacheKey, out var prev))
-                            {
-                                _lastForceRefreshTokenRefreshed = exp > prev;
-                            }
-
-                            _lastTokenExpByCacheKey[toolCacheKey] = exp;
-                        }
-                        _logger.LogInformation("MCPToolRefresh key={Key} tokenRefreshed={Refreshed}.",
-                            toolCacheKey, _lastForceRefreshTokenRefreshed?.ToString() ?? "unknown");
+                        _logger.LogInformation("MCPToolRefresh key={Key} tokenRefreshed=unknown.", toolCacheKey);
                     }
 
                     if (!context.IsAgenticRequest())
@@ -609,6 +581,7 @@ public class PlaygroundAgent : AgentApplication
                         : _oboAuthHandlerName ?? _agenticAuthHandlerName ?? string.Empty;
                     var tokenOverride = string.IsNullOrEmpty(authHandlerName) ? accessToken : null;
 
+                    using var discovery = McpDiscoveryScope.Begin();
                     var a365Tools = await _toolService.GetMcpToolsAsync(agentId, UserAuthorization, handlerForMcp, context, tokenOverride).ConfigureAwait(false);
 
                     if (a365Tools != null && a365Tools.Count > 0)
@@ -618,6 +591,15 @@ public class PlaygroundAgent : AgentApplication
                             string.Join(", ", a365Tools.OfType<AIFunction>().Select(t => t.Name)));
                         toolList.AddRange(a365Tools);
 
+                        if (!discovery.IsComplete)
+                        {
+                            _logger.LogWarning(
+                                "MCP discovery incomplete or unverified ({Loaded}/{Discovered} servers). Using available tools for this turn without caching; discovery will retry next turn.",
+                                discovery.LoadedServerCount?.ToString() ?? "unknown",
+                                discovery.DiscoveredServerCount?.ToString() ?? "unknown");
+                            return toolList;
+                        }
+
                         // Best-effort LRU: when at cap, drop the least-recently-accessed entry
                         // before inserting the new one. Count + eviction is racy under concurrent
                         // load (count may briefly exceed the cap); acceptable for a soft bound.
@@ -625,7 +607,6 @@ public class PlaygroundAgent : AgentApplication
                         {
                             var oldest = _agentToolCache.MinBy(kvp => kvp.Value.LastAccessed);
                             _agentToolCache.TryRemove(oldest.Key, out _);
-                            _lastTokenExpByCacheKey.TryRemove(oldest.Key, out _); // keep Signal-2 dict bounded to the tool cache
                             _logger.LogInformation("Tool cache cap reached ({Max}). Evicted: {Key}", MaxToolCacheEntries, oldest.Key);
                         }
                         _agentToolCache[toolCacheKey] = new ToolCacheEntry { Tools = [.. a365Tools] };
@@ -649,13 +630,7 @@ public class PlaygroundAgent : AgentApplication
         return toolList;
     }
 
-    // The tool cache key is per (human caller, agent) — BOTH parts are required:
-    //  - userToolCacheKey: a stable per-caller GUID kept in User state (UserState is keyed by
-    //    channel + caller). Isolates OBO tokens so one caller's tools are never reused for another.
-    //  - agentId: the resolved agent identity. Cached A365 MCP tools carry an agent-specific bearer
-    //    token baked into their HTTP transport at enumeration time; without agentId in the key, a
-    //    single caller addressing multiple agents would collapse onto one entry and run tool calls
-    //    (e.g. Teams SendMessageToUser) under whichever agent loaded first — i.e. send as the wrong agent.
+    // Preserve caller isolation and bind agentic transports to their tenant and conversation.
     private string GetToolCacheKey(ITurnState turnState, string agentId)
     {
         string userToolCacheKey = turnState.User.GetValue<string?>("user.toolCacheKey", () => null) ?? "";
@@ -664,6 +639,8 @@ public class PlaygroundAgent : AgentApplication
             userToolCacheKey = Guid.NewGuid().ToString();
             turnState.User.SetValue("user.toolCacheKey", userToolCacheKey);
         }
-        return $"{userToolCacheKey}:{agentId}";
+        return McpRequestContext.Current?.Identity is { } identity
+            ? JsonSerializer.Serialize(new object[] { userToolCacheKey, agentId, identity })
+            : $"{userToolCacheKey}:{agentId}";
     }
 }
