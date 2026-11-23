@@ -159,6 +159,13 @@ Both gates skip automatically in `BEARER_TOKEN` development mode.
 
 See [step-by-step-tutorial.md → Throttling — operational notes](step-by-step-tutorial.md#throttling--operational-notes) for caveats and tuning knobs.
 
+## Model request resilience
+
+Responses API calls use a 180-second model-step budget, bounded transient retries,
+and Retry-After-aware 429 backoff. Retries resend only the model request, not
+completed tool actions. See [model request resilience](docs/model-resilience.md)
+for deadlines, cancellation behavior, limitations, and regression tests.
+
 ## Project layout
 
 ```

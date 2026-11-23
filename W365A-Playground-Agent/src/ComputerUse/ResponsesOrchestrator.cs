@@ -3,6 +3,7 @@
 
 using System.Collections.Concurrent;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -40,6 +41,7 @@ public sealed class ResponsesOrchestrator
     private readonly ILogger<ResponsesOrchestrator> _logger;
     private readonly ITurnScopeAccessor _turnScopes;
     private readonly IScreenshareTicketStore _ticketStore;
+    private readonly TimeProvider _timeProvider;
     private readonly string _responsesUrl;
     private readonly string _model;
     private readonly string _apiKey;
@@ -296,12 +298,14 @@ public sealed class ResponsesOrchestrator
         IConfiguration configuration,
         ILogger<ResponsesOrchestrator> logger,
         ITurnScopeAccessor turnScopes,
-        IScreenshareTicketStore ticketStore)
+        IScreenshareTicketStore ticketStore,
+        TimeProvider? timeProvider = null)
     {
         _httpClientFactory = httpClientFactory;
         _logger = logger;
         _turnScopes = turnScopes;
         _ticketStore = ticketStore;
+        _timeProvider = timeProvider ?? TimeProvider.System;
 
         var endpoint = (configuration["AIServices:AzureOpenAI:Endpoint"]
             ?? throw new InvalidOperationException("AIServices:AzureOpenAI:Endpoint is required.")).TrimEnd('/');
@@ -1537,8 +1541,8 @@ public sealed class ResponsesOrchestrator
 
     /// <summary>
     /// Posts the full conversation history to the Responses API and returns the model's output.
-    /// Retries up to <c>maxAttempts</c> times on HTTP 429, honouring the <c>Retry-After</c> header
-    /// with exponential-backoff fallback (2 s, 4 s, 8 s).
+    /// Bounds the model step to 180 seconds, with a 60-second first attempt and 120-second later attempts.
+    /// Allows one transient-failure retry; HTTP 429 retains up to four total attempts and Retry-After.
     /// </summary>
     private async Task<ResponsesResponse> CallModelAsync(
         IList<JsonElement> input,
@@ -1547,6 +1551,12 @@ public sealed class ResponsesOrchestrator
         Agent365TurnOperation? agent365Turn,
         CancellationToken cancellationToken)
     {
+        var stepBudget = TimeSpan.FromSeconds(180);
+        var started = _timeProvider.GetTimestamp();
+        using var stepDeadline = new CancellationTokenSource(stepBudget, _timeProvider);
+        using var stepCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken, stepDeadline.Token);
+
         var requestBody = new
         {
             model = _model,
@@ -1562,51 +1572,107 @@ public sealed class ResponsesOrchestrator
         using var inferenceTelemetry = agent365Turn?.StartInference(_model, input.Count, json.Length);
         const int maxAttempts = 4;
         var retryCount = 0;
+        var transientRetryUsed = false;
         try
         {
             for (int attempt = 1; attempt <= maxAttempts; attempt++)
             {
-                var http = _httpClientFactory.CreateClient("WebClient");
-                using var request = new HttpRequestMessage(HttpMethod.Post, _responsesUrl);
-                request.Headers.Add("api-key", _apiKey);
-                request.Content = new StringContent(json, Encoding.UTF8, "application/json");
-
-                using var httpResponse = await http.SendAsync(request, cancellationToken);
-                var responseJson = await httpResponse.Content.ReadAsStringAsync(cancellationToken);
-
-                if (httpResponse.IsSuccessStatusCode)
+                stepCancellation.Token.ThrowIfCancellationRequested();
+                retryCount = attempt - 1;
+                var attemptTimeout = TimeSpan.FromSeconds(attempt == 1 ? 60 : 120);
+                var retryDelay = TimeSpan.Zero;
+                string retryReason;
+                using (var attemptDeadline = new CancellationTokenSource(attemptTimeout, _timeProvider))
+                using (var attemptCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+                    stepCancellation.Token, attemptDeadline.Token))
                 {
-                    var parsed = JsonSerializer.Deserialize<ResponsesResponse>(responseJson, JsonOptions)
-                        ?? throw new InvalidOperationException("Null Responses API response.");
-                    var outputTextLength = parsed.Output.Sum(item => ExtractMessageText(item).Length);
-                    inferenceTelemetry?.Complete(
-                        parsed.Id,
-                        parsed.Status ?? "completed",
-                        parsed.Usage?.InputTokens ?? 0,
-                        parsed.Usage?.OutputTokens ?? 0,
-                        parsed.Usage?.InputTokensDetails?.CachedTokens ?? 0,
-                        parsed.Usage?.OutputTokensDetails?.ReasoningTokens ?? 0,
-                        parsed.Output.Count,
-                        outputTextLength,
-                        retryCount);
-                    _logger.LogDebug("Responses API OK: {OutputItems} output items", parsed.Output.Count);
-                    return parsed;
+                    try
+                    {
+                        var http = _httpClientFactory.CreateClient("WebClient");
+                        using var request = new HttpRequestMessage(HttpMethod.Post, _responsesUrl);
+                        request.Headers.Add("api-key", _apiKey);
+                        request.Content = new StringContent(json, Encoding.UTF8, "application/json");
+
+                        using var httpResponse = await http.SendAsync(request, attemptCancellation.Token);
+                        var responseJson = await httpResponse.Content.ReadAsStringAsync(attemptCancellation.Token);
+                        attemptCancellation.Token.ThrowIfCancellationRequested();
+
+                        if (httpResponse.IsSuccessStatusCode)
+                        {
+                            var parsed = JsonSerializer.Deserialize<ResponsesResponse>(responseJson, JsonOptions)
+                                ?? throw new InvalidOperationException("Null Responses API response.");
+                            attemptCancellation.Token.ThrowIfCancellationRequested();
+                            var outputTextLength = parsed.Output.Sum(item => ExtractMessageText(item).Length);
+                            inferenceTelemetry?.Complete(
+                                parsed.Id,
+                                parsed.Status ?? "completed",
+                                parsed.Usage?.InputTokens ?? 0,
+                                parsed.Usage?.OutputTokens ?? 0,
+                                parsed.Usage?.InputTokensDetails?.CachedTokens ?? 0,
+                                parsed.Usage?.OutputTokensDetails?.ReasoningTokens ?? 0,
+                                parsed.Output.Count,
+                                outputTextLength,
+                                retryCount);
+                            _logger.LogDebug("Responses API OK: {OutputItems} output items", parsed.Output.Count);
+                            return parsed;
+                        }
+
+                        var status = (int)httpResponse.StatusCode;
+                        var transient = status is 408 or 500 or 502 or 503 or 504;
+                        var canRetry = attempt < maxAttempts
+                            && (status == 429 || (transient && !transientRetryUsed));
+                        if (!canRetry)
+                        {
+                            _logger.LogError("Responses API {Status}: {Body}", httpResponse.StatusCode, responseJson);
+                            throw new HttpRequestException(
+                                $"Responses API {httpResponse.StatusCode}: {responseJson}", null, httpResponse.StatusCode);
+                        }
+
+                        retryDelay = CalculateModelRetryDelay(httpResponse.Headers.RetryAfter, attempt,
+                            _timeProvider.GetUtcNow(), TimeSpan.FromSeconds(Random.Shared.NextDouble()));
+                        var remaining = stepBudget - _timeProvider.GetElapsedTime(started);
+                        if (retryDelay >= remaining)
+                        {
+                            _logger.LogWarning(
+                                "Responses API {Status}: retry delay {Delay:F2}s exceeds the remaining model-step budget.",
+                                status, retryDelay.TotalSeconds);
+                            throw new HttpRequestException(
+                                $"Responses API {httpResponse.StatusCode}: retry delay exceeds the remaining model-step budget.",
+                                null, httpResponse.StatusCode);
+                        }
+
+                        transientRetryUsed |= transient;
+                        retryReason = $"HTTP {status}";
+                    }
+                    catch (OperationCanceledException ex) when (
+                        attemptDeadline.IsCancellationRequested && !stepCancellation.IsCancellationRequested)
+                    {
+                        if (transientRetryUsed || attempt == maxAttempts)
+                        {
+                            throw new TimeoutException(
+                                $"Model request exceeded its {attemptTimeout.TotalSeconds:F0}-second attempt timeout.", ex);
+                        }
+                        transientRetryUsed = true;
+                        retryReason = "attempt timeout";
+                    }
+                    catch (HttpRequestException ex) when (
+                        ex.StatusCode is null
+                        && (ex.HttpRequestError is HttpRequestError.ConnectionError or HttpRequestError.ResponseEnded)
+                        && !stepCancellation.IsCancellationRequested
+                        && !transientRetryUsed && attempt < maxAttempts)
+                    {
+                        transientRetryUsed = true;
+                        retryReason = ex.HttpRequestError.ToString();
+                        retryDelay = CalculateModelRetryDelay(null, attempt,
+                            _timeProvider.GetUtcNow(), TimeSpan.FromSeconds(Random.Shared.NextDouble()));
+                    }
                 }
 
-                if ((int)httpResponse.StatusCode == 429 && attempt < maxAttempts)
-                {
-                    retryCount++;
-                    var retryAfterSecs = httpResponse.Headers.RetryAfter?.Delta?.TotalSeconds
-                                         ?? Math.Pow(2, attempt); // fallback: 2s, 4s, 8s
-                    _logger.LogWarning(
-                        "Responses API 429 rate-limited. Retrying in {Delay:F0}s (attempt {Attempt}/{Max}).",
-                        retryAfterSecs, attempt, maxAttempts);
-                    await Task.Delay(TimeSpan.FromSeconds(retryAfterSecs), cancellationToken);
-                    continue;
-                }
-
-                _logger.LogError("Responses API {Status}: {Body}", httpResponse.StatusCode, responseJson);
-                throw new HttpRequestException($"Responses API {httpResponse.StatusCode}: {responseJson}");
+                _logger.LogWarning(
+                    "Responses API retry after {Reason}, attempt {Attempt}/{Max}, delay {Delay:F2}s, elapsed {Elapsed:F2}s.",
+                    retryReason, attempt, maxAttempts, retryDelay.TotalSeconds,
+                    _timeProvider.GetElapsedTime(started).TotalSeconds);
+                await Task.Delay(retryDelay, _timeProvider, stepCancellation.Token);
             }
 
             throw new InvalidOperationException("Responses API retry loop exited unexpectedly.");
@@ -1616,11 +1682,26 @@ public sealed class ResponsesOrchestrator
             inferenceTelemetry?.RecordCancellation();
             throw;
         }
+        catch (OperationCanceledException ex) when (stepDeadline.IsCancellationRequested)
+        {
+            var timeout = new TimeoutException("Model step exceeded its 180-second total budget.", ex);
+            inferenceTelemetry?.RecordFailure(timeout, retryCount);
+            _logger.LogWarning(timeout, "Responses API model-step budget exhausted after {RetryCount} retries.", retryCount);
+            throw timeout;
+        }
         catch (Exception ex)
         {
             inferenceTelemetry?.RecordFailure(ex, retryCount);
             throw;
         }
+    }
+
+    internal static TimeSpan CalculateModelRetryDelay(
+        RetryConditionHeaderValue? retryAfter, int attempt, DateTimeOffset now, TimeSpan jitter)
+    {
+        var delay = retryAfter?.Delta
+            ?? (retryAfter?.Date is { } retryAt ? retryAt - now : TimeSpan.FromSeconds(Math.Pow(2, attempt)));
+        return (delay < TimeSpan.Zero ? TimeSpan.Zero : delay) + jitter;
     }
 
     /// <summary>
