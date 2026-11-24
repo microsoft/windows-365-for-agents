@@ -2,7 +2,6 @@
 // Licensed under the MIT License.
 
 using System.Diagnostics;
-using System.Text.Json;
 using System.Threading.RateLimiting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
@@ -14,26 +13,33 @@ namespace Microsoft.W365APlaygroundAgent.Tests;
 public class ThrottlingPolicyTests
 {
     [Fact]
-    public void WorkshopProfileAdmitsOneHundredStartAndClosePairsWithIndependentHumanBuckets()
+    public void ConfiguredCallerBucketsApplyAlongsideIngressLimit()
     {
-        var values = JsonSerializer.Deserialize<Dictionary<string, string>>(
-            File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "workshop.settings.example.json")))!;
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(
-            values.ToDictionary(pair => pair.Key.Replace("__", ":"), pair => (string?)pair.Value)).Build();
+            new Dictionary<string, string?>
+            {
+                ["Throttling:MessagesPerMinute"] = "4",
+                ["Throttling:UserBurst:Enabled"] = "true",
+                ["Throttling:UserBurst:TokensPerMinute"] = "1",
+                ["Throttling:UserBurst:BurstCapacity"] = "2"
+            }).Build();
         var settings = configuration.GetSection(ThrottlingOptions.SectionName).Get<ThrottlingOptions>()!;
         settings.Validate();
         using var ingress = new FixedWindowRateLimiter(settings.CreateIngressOptions());
-        using var humans = new UserBurstLimiter(Options.Create(settings));
+        using var callers = new UserBurstLimiter(Options.Create(settings));
         for (var message = 0; message < 2; message++)
         {
-            for (var user = 0; user < 100; user++)
+            foreach (var caller in new[] { "caller-a", "caller-b" })
             {
                 using var admission = ingress.AttemptAcquire();
                 Assert.True(admission.IsAcquired);
-                Assert.True(humans.TryConsume($"human-{user}", out _));
+                Assert.True(callers.TryConsume(caller, out _));
             }
         }
-        Assert.False(humans.TryConsume("human-0", out _));
+        Assert.False(callers.TryConsume("caller-a", out _));
+        Assert.False(callers.TryConsume("caller-b", out _));
+        using var overflow = ingress.AttemptAcquire();
+        Assert.False(overflow.IsAcquired);
     }
 
     [Fact]

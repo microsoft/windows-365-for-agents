@@ -18,7 +18,4 @@
   <ItemGroup>
     <ProjectReference Include="..\src\W365APlaygroundAgent.csproj" />
   </ItemGroup>
-  <ItemGroup>
-    <None Include="..\config\workshop.settings.example.json" Link="workshop.settings.example.json" CopyToOutputDirectory="PreserveNewest" />
-  </ItemGroup>
 </Project>

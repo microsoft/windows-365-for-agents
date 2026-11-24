@@ -473,8 +473,10 @@ The HTTP rate limit, optional per-caller burst limit, and per-user turn quota ar
 
 The defaults remain conservative for a demo agent. Ingress and burst options are
 read from configuration at startup; the daily quota remains a code constant.
-The [workshop example](config/workshop.settings.example.json) is not loaded or
-deployed automatically. Applying settings requires separate authorization and a restart.
+Use application configuration or environment variables (with `__` in place of
+`:`) to tune the same options for any deployment. See the
+[admission configuration reference](README.md#admission-configuration).
+Changes take effect after an application restart.
 
 | Setting | Where | Default |
 |---|---|---|

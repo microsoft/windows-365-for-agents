@@ -160,23 +160,24 @@ The per-caller limits are skipped in `BEARER_TOKEN` development mode or when
 caller identity is missing; HTTP admission remains enforced. The daily quota
 remains **100 turns per rolling 24 hours**.
 
-### Optional workshop admission settings
+### Admission configuration
 
-[config/workshop.settings.example.json](config/workshop.settings.example.json)
-illustrates a higher ingress ceiling with caller burst limiting. It is not
-automatically loaded or applied to any deployment.
+Configure admission limits for the deployment's expected traffic and downstream
+capacity through application configuration or environment variables. The same
+options apply to every deployment; no environment-specific preset is required.
 
-| Startup configuration | Default | Example |
-|---|---|---|
-| `Throttling:MessagesPerMinute` | 5 | 300 |
-| `Throttling:UserBurst:Enabled` | false | true |
-| `Throttling:UserBurst:TokensPerMinute` | 5 | 5 |
-| `Throttling:UserBurst:BurstCapacity` | 2 | 2 |
+| Startup configuration | Default |
+|---|---|
+| `Throttling:MessagesPerMinute` | 5 |
+| `Throttling:UserBurst:Enabled` | false |
+| `Throttling:UserBurst:TokensPerMinute` | 5 |
+| `Throttling:UserBurst:BurstCapacity` | 2 |
 
-The example uses `__` separators for environment settings. Nonpositive rates or
-capacities fail startup validation. Applying different settings requires a restart
-and separate deployment authorization; these values do not establish backend
-capacity or permit an unlimited number of actions inside one turn.
+Use `__` in place of `:` for environment variables, such as
+`Throttling__MessagesPerMinute`. Nonpositive rates or capacities fail startup
+validation. Settings are read at startup, so changing them requires a restart.
+Raising admission limits does not increase backend capacity or bound the number
+of actions inside one turn.
 
 See [step-by-step-tutorial.md → Throttling — operational notes](step-by-step-tutorial.md#throttling--operational-notes) for caveats and tuning knobs.
 
