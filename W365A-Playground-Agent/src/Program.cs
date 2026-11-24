@@ -53,7 +53,9 @@ if (builder.Configuration.GetValue<bool>("EnableAgent365Exporter"))
 // A365 MCP tool registration: lets the agent enumerate and invoke MCP servers declared in
 // ToolingManifest.json (e.g. mcp_W365ComputerUse for Cloud PC computer use).
 builder.Services.AddSingleton<IMcpToolRegistrationService, McpToolRegistrationService>();
-builder.Services.AddSingleton<IMcpToolServerConfigurationService, McpToolServerConfigurationService>();
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<McpTokenCache>();
+builder.Services.AddSingleton<IMcpToolServerConfigurationService, RefreshingMcpToolServerConfigurationService>();
 
 // Per-user turn quota: 100 turns per rolling 24h, in-memory. Singleton so state is shared
 // across the (transient) PlaygroundAgent instances. For multi-instance production, back this with
