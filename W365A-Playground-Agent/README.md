@@ -144,6 +144,17 @@ step-by-step tutorial was written for an older CLI; consult the
 [current command reference](https://learn.microsoft.com/microsoft-agent-365/developer/reference/cli/setup)
 for current setup and permission commands.
 
+## Conversation-state retention
+
+`ConversationState:MaxCachedConversations` sets the process-local conversation
+cache's soft limit (default **100**, must be positive). Admission evicts the least
+recently used idle conversations only when they have no tracked Cloud PC session
+IDs. Active or queued turns and conversations tracking Cloud PCs are preserved.
+If no state is eligible, the cache exceeds the limit and logs a warning.
+
+This is not a hard memory bound or durable storage. Externally expired sessions
+still need reconciliation, and a process restart loses the in-memory state.
+
 ## Throttling
 
 Two independent gates protect the agent from abuse — together they prevent both volumetric
