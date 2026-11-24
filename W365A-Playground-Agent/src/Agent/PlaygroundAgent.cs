@@ -77,6 +77,7 @@ public class PlaygroundAgent : AgentApplication
     private readonly ILogger<PlaygroundAgent> _logger;
     private readonly IMcpToolRegistrationService _toolService;
     private readonly IUserTurnLimiter _turnLimiter;
+    private readonly IUserBurstLimiter _burstLimiter;
     private readonly ITurnScopeAccessor _turnScopes;
     private readonly Agent365ActivityTelemetry _agent365ActivityTelemetry;
     private readonly IScreenshareIssuer _screenshareIssuer;
@@ -159,13 +160,15 @@ public class PlaygroundAgent : AgentApplication
         ITurnScopeAccessor turnScopes,
         Agent365ActivityTelemetry agent365ActivityTelemetry,
         IScreenshareIssuer screenshareIssuer,
-        IScreenshareTicketStore ticketStore) : base(options)
+        IScreenshareTicketStore ticketStore,
+        IUserBurstLimiter burstLimiter) : base(options)
     {
         _orchestrator = orchestrator;
         _configuration = configuration;
         _logger = logger;
         _toolService = toolService;
         _turnLimiter = turnLimiter;
+        _burstLimiter = burstLimiter;
         _turnScopes = turnScopes;
         _agent365ActivityTelemetry = agent365ActivityTelemetry;
         _screenshareIssuer = screenshareIssuer;
@@ -364,19 +367,30 @@ public class PlaygroundAgent : AgentApplication
             turnContext,
             turnContext.Activity.Text?.Length ?? 0);
 
-        // Per-user turn quota: 100 turns per rolling 24h. Skipped in BEARER_TOKEN dev mode
+        // Per-user admission: optional short-term bucket, then 100 turns per rolling 24h.
+        // Skipped in BEARER_TOKEN dev mode
         // (no real Teams caller in that flow). A blocked user sees a friendly text reply.
         if (!TryGetBearerTokenForDevelopment(out _))
         {
             // Use AadObjectId when present; fall back to channel-specific From.Id for activity
             // types (e.g. email) that don't carry an Entra OID. If neither is present, skip the
-            // per-user quota and rely on the global HTTP rate limiter — "can't measure" should
+            // per-user limits and rely on the global HTTP rate limiter — "can't measure" should
             // not equal "blocked".
             var quotaKey = fromAccount?.AadObjectId ?? fromAccount?.Id;
             if (string.IsNullOrEmpty(quotaKey))
             {
                 _logger.LogDebug("TurnLimit: skipped — no caller identity on activity (channel: {Channel})",
                     turnContext.Activity.ChannelId);
+            }
+            else if (!_burstLimiter.TryConsume(quotaKey, out var retryAfter))
+            {
+                var seconds = Math.Max(1, (int)Math.Ceiling(retryAfter.TotalSeconds));
+                _logger.LogWarning("UserBurstLimit: BLOCKED — caller={Caller} retryAfterSeconds={Seconds}",
+                    quotaKey, seconds);
+                var limitMessage = $"You're sending too many requests. Please wait {seconds} seconds before trying again.";
+                await turnContext.SendActivityAsync(MessageFactory.Text(limitMessage), cancellationToken);
+                agent365Turn?.RecordOutput(1, limitMessage.Length);
+                return;
             }
             else if (!_turnLimiter.TryConsume(quotaKey, out var turnCount))
             {

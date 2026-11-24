@@ -157,16 +157,38 @@ still need reconciliation, and a process restart loses the in-memory state.
 
 ## Throttling
 
-Two independent gates protect the agent from abuse — together they prevent both volumetric
-floods (a script hammering the endpoint) and runaway single-user usage (a buggy script
-generating hundreds of LLM calls in minutes).
+Admission controls limit incoming messages, not the number of model or tool calls
+one message can generate. All counters are process-local and reset on restart.
 
 | Gate | Scope | Limit | Mechanism | Response on overflow |
 |---|---|---|---|---|
-| **HTTP rate limit** | All callers, globally | 5 req / 1 min | ASP.NET Core fixed-window limiter on `/api/messages` | HTTP `429 Too Many Requests` |
+| **HTTP rate limit** | All callers on one instance | Configurable, default 5 req / 1 min | Fixed-window limiter on `/api/messages`, no queue | HTTP `429 Too Many Requests` |
+| **Per-caller burst limit** | Same caller identity as the turn quota, never IP | Disabled by default; optional 5 tokens/min, capacity 2 | Partitioned token buckets; one token refills every 12 seconds | Friendly retry-interval reply, not HTTP 429 |
 | **Per-user turn quota** | Per `Activity.From.AadObjectId` | 100 turns / rolling 24 h | In-memory `Queue<DateTime>` per OID, prune-on-read | Friendly text reply, not 429 |
 
-Both gates skip automatically in `BEARER_TOKEN` development mode.
+Burst rejection occurs before charging the daily quota and before model/tool work.
+The per-caller limits are skipped in `BEARER_TOKEN` development mode or when
+caller identity is missing; HTTP admission remains enforced. The daily quota
+remains **100 turns per rolling 24 hours**.
+
+### Admission configuration
+
+Configure admission limits for the deployment's expected traffic and downstream
+capacity through application configuration or environment variables. The same
+options apply to every deployment; no environment-specific preset is required.
+
+| Startup configuration | Default |
+|---|---|
+| `Throttling:MessagesPerMinute` | 5 |
+| `Throttling:UserBurst:Enabled` | false |
+| `Throttling:UserBurst:TokensPerMinute` | 5 |
+| `Throttling:UserBurst:BurstCapacity` | 2 |
+
+Use `__` in place of `:` for environment variables, such as
+`Throttling__MessagesPerMinute`. Nonpositive rates or capacities fail startup
+validation. Settings are read at startup, so changing them requires a restart.
+Raising admission limits does not increase backend capacity or bound the number
+of actions inside one turn.
 
 See [step-by-step-tutorial.md → Throttling — operational notes](step-by-step-tutorial.md#throttling--operational-notes) for caveats and tuning knobs.
 
