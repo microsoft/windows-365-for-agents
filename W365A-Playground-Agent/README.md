@@ -139,8 +139,19 @@ configuration, not in chat.
 | Model access | `AIServices:AzureOpenAI:Endpoint`, `DeploymentName`, and `ApiKey` in [appsettings.json](src/appsettings.json). Use your own resource and compatible model deployment. The orchestrator calls `/openai/v1/responses`; it does not read an `ApiVersion` setting. |
 | Agent identity and permissions | Your tenant and agent blueprint, `Connections:ServiceConnection:Settings`, and `TokenValidation`. Identity creation and consent are live setup steps, not part of building the sample. |
 | Available tools | [ToolingManifest.json](src/ToolingManifest.json) declares Mail and Teams as well as Windows 365 computer use. Review which capabilities you need and arrange the corresponding permissions; editing the manifest alone does not grant access. Published service audiences/scopes are not your tenant or blueprint IDs. |
-| Teams identity and branding | [appPackage/manifest.json](src/appPackage/manifest.json): your app and bot IDs, names, developer information, domains, and privacy/terms URLs. Review the referenced icons too. |
+| Classic Teams identity and branding | [appPackage/manifest.json](src/appPackage/manifest.json) is the checked-in classic Teams template, not the A365 publishing input. Review its app and bot IDs, names, developer information, domains, privacy/terms URLs, and referenced icons only for that packaging path. |
+| A365 package identity and branding | The generated `<deploymentProjectPath>/manifest/manifest.json` and icons in the same directory are the A365 publishing inputs. Customize names, descriptions, developer information, privacy/terms URLs, and icons there; the CLI stamps identity fields from your configured blueprint. |
 | Optional Watch live viewer | `Screenshare:PublicBaseUrl`, `Screenshare:AllowedTenantIds`, and `AzureAd` in [appsettings.json](src/appsettings.json). The empty tenant allowlist disables card offers; setting it does not make the viewer a general multi-tenant application. |
+
+For the pinned Agent 365 CLI **2.0.1**, `a365 publish` resolves
+`deploymentProjectPath` relative to the CLI's working directory and uses its
+`manifest` subdirectory. With the templates' `"deploymentProjectPath": "."` and
+the CLI run from `src`, this is `src/manifest/manifest.json`. If the directory is
+absent, the CLI extracts embedded templates there. During an explicitly authorized
+interactive publish, use its edit prompt to review and customize that manifest
+and its icons before continuing to create `manifest/manifest.zip`.
+Edits to `src/appPackage/manifest.json` are not copied into that A365 package.
+See the [pinned CLI's publishing implementation](https://github.com/microsoft/Agent365-devTools/blob/v2.0.1/src/Microsoft.Agents.A365.DevTools.Cli/Commands/PublishCommand.cs#L187-L273).
 
 Keep local credentials in .NET user secrets and deployed credentials in environment
 or hosting settings, not source files. Configuration keys use `:` in user secrets

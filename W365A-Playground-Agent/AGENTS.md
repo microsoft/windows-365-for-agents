@@ -31,7 +31,9 @@ Paths below are relative to this directory.
 | MCP transport recovery, image history and Teams screenshot preferences | [src/ComputerUse/](src/ComputerUse/) |
 | Watch live cards, viewer access and tickets | [src/Screenshare/](src/Screenshare/) |
 | Incoming JWT validation, telemetry and per-user quotas | [src/Auth/](src/Auth/), [src/Telemetry/](src/Telemetry/), [src/Throttling/](src/Throttling/) |
-| Runtime configuration, tool declarations and Teams presentation | [src/appsettings.json](src/appsettings.json), [src/ToolingManifest.json](src/ToolingManifest.json), [src/appPackage/manifest.json](src/appPackage/manifest.json) |
+| Runtime configuration and tool declarations | [src/appsettings.json](src/appsettings.json), [src/ToolingManifest.json](src/ToolingManifest.json) |
+| Classic Teams identity and branding | [src/appPackage/manifest.json](src/appPackage/manifest.json) and its referenced icons; this is not the A365 publishing input |
+| A365 package identity and branding | Generated `<deploymentProjectPath>/manifest/manifest.json` and icons in that directory, used by the pinned CLI's `a365 publish`; see the [README configuration checklist](README.md#4-configure-your-environment-when-ready-for-live-use) for path resolution and the interactive edit step |
 | Regression tests | [tests/](tests/) |
 
 These instructions guide the coding assistant. They are separate from the
