@@ -9,8 +9,11 @@ agent blueprint and MCP tooling, and the
 registration — with the **`mcp_W365ComputerUse`** MCP server wired up so the agent can take
 screenshots, click, type, and run shell commands inside a Cloud PC.
 
-> **➡ For the complete step-by-step setup, deploy, and troubleshooting walkthrough,
-> see [step-by-step-tutorial.md](step-by-step-tutorial.md).**
+> **Customizing this sample with a coding agent? Start with
+> [Fork and customize with a coding agent](#fork-and-customize-with-a-coding-agent).**
+> For live-service setup and troubleshooting, see the
+> [tutorial](step-by-step-tutorial.md) and its
+> [CLI compatibility caveats](#dependency-baseline-and-agent-365-sdk-20).
 
 ## What you'll learn
 
@@ -30,37 +33,178 @@ By following this sample end-to-end, you will:
 
 | Goal | What you need |
 |---|---|
-| Compile and run locally (no Cloud PC) | .NET 10 SDK, Azure OpenAI resource |
+| Build and run automated tests | .NET 10 SDK and NuGet access for initial package restore; no cloud credentials |
+| Run locally with model access | + your own Azure OpenAI resource and a deployment supporting the Responses API and the sample's computer-use tools |
 | Full A365 production deployment | + Azure subscription, [`a365` CLI](https://learn.microsoft.com/en-us/microsoft-agent-365/developer/agent-365-cli), Entra tenant admin (or Agent ID Developer role) |
 | Full Cloud PC computer use | + [Agent 365 Frontier Program](https://adoption.microsoft.com/copilot/frontier-program/) enrollment + provisioned [Windows 365 Cloud PC agent pool](../docs/cloud-pc-pools.md) |
 
 For exact versions, links, and the full prerequisite list, see [step-by-step-tutorial.md](step-by-step-tutorial.md).
+For CLI compatibility caveats, see [Dependency baseline and Agent 365 SDK 2.0](#dependency-baseline-and-agent-365-sdk-20).
+
+## Fork and customize with a coding agent
+
+This workflow is for a human developer using a local coding agent. You define the
+goal, choose your environment, review the changes, and approve live operations.
+The coding agent helps inspect the code, plan and implement a bounded change, and
+run validation. It should not need your credentials to explore, build, or test.
+
+### 1. Fork the whole repository
+
+This directory is a sample within
+[`microsoft/windows-365-for-agents`](https://github.com/microsoft/windows-365-for-agents),
+not a standalone repository. Fork the parent repository so the platform documentation,
+relative links, licenses, and root .NET tool manifest remain available.
+
+Create the fork under your chosen GitHub account or organization. You or your
+coding agent can then clone it and create a working branch. For a new checkout,
+replace `<your-account>` with your fork's owner:
+
+```powershell
+git clone "https://github.com/<your-account>/windows-365-for-agents.git"
+Set-Location .\windows-365-for-agents
+git remote add upstream https://github.com/microsoft/windows-365-for-agents.git
+git switch -c customize-playground
+Set-Location .\W365A-Playground-Agent
+```
+
+`origin` is your fork; `upstream` is Microsoft's source repository. Use a branch for
+your changes so they stay separate from the upstream baseline.
+
+Open the repository root in your editor and ask the coding agent to read the
+[root AGENTS.md](../AGENTS.md) and [sample AGENTS.md](AGENTS.md) before proposing
+changes. Both are fork-neutral guidance, not the application's runtime prompt.
+
+### 2. Verify the unchanged checkout
+
+Ask the coding agent to establish the unchanged baseline and explain any failures
+before editing. These are the commands it should run from `W365A-Playground-Agent`:
+
+```powershell
+dotnet --version
+dotnet build .\W365APlaygroundAgent.sln
+dotnet test .\tests\W365APlaygroundAgent.Tests.csproj
+```
+
+Install the **.NET 10 SDK** if needed; the .NET 10 runtime alone cannot compile this
+project. These build/tests need no cloud accounts or Agent 365 CLI. The tests use
+fakes rather than live model or MCP endpoints.
+
+**The solution does not include the test project.** Run the explicit test command,
+not just a solution build or solution-level `dotnet test`. Record existing warnings
+or failures before changing code so they can be distinguished from regressions.
+
+### 3. Plan, implement, and review one change
+
+You do not need cloud credentials to start changing code. Give the coding agent
+one specific goal and acceptance criteria. For example:
+
+```text
+Read the root and playground AGENTS.md files. I want to change [one behavior]
+so that [expected result]. Preserve [behavior that must remain unchanged].
+
+Inspect the relevant code and propose the files to change and regression tests.
+After I approve the plan, implement it and run the documented build and tests.
+Explain the result and any warnings. Do not provision resources, grant permissions,
+deploy, or make live model, Teams, MCP, or Cloud PC calls.
+```
+
+Use this map to discuss the scope with the coding agent:
+
+| Customization | Starting point |
+|---|---|
+| Agent personality, instructions, and greetings | `AgentInstructionsTemplate` and message fields in [PlaygroundAgent.cs](src/Agent/PlaygroundAgent.cs) |
+| Model/tool orchestration and computer actions | [ResponsesOrchestrator.cs](src/ComputerUse/ResponsesOrchestrator.cs); preserve the distinction between MCP transport recovery and Cloud PC session lifecycle |
+| Screenshot history and Teams image delivery | [ScreenshotHistory.cs](src/ComputerUse/ScreenshotHistory.cs) and [TeamsScreenshotDelivery.cs](src/ComputerUse/TeamsScreenshotDelivery.cs) |
+| User quota and global HTTP rate limit | [UserTurnLimiter.cs](src/Throttling/UserTurnLimiter.cs) and [Program.cs](src/Program.cs) |
+| Viewer experience and access policy | [Screenshare/](src/Screenshare/) and the tenant/hirer checks in [PlaygroundAgent.cs](src/Agent/PlaygroundAgent.cs) |
+
+Have the coding agent add focused regression tests in [tests/](tests/) and rerun
+the build and explicit test command. Review the diff and validation results before
+committing or pushing. Keep unrelated dependency upgrades and deployment changes
+separate so behavior changes are easier to review.
+
+If you are only developing and reviewing code, you can stop here. Live environment
+setup is not a prerequisite for this edit/build/test loop.
+
+### 4. Configure your environment when ready for live use
+
+Continue here only when you need to run against real services. Build/test success
+does not configure a working agent. Ask the coding agent to identify which settings
+your customization needs, using the checklist below. You choose the resources and
+permissions and supply any credentials directly through local or hosting
+configuration, not in chat.
+
+| Concern | Configuration to review |
+|---|---|
+| Model access | `AIServices:AzureOpenAI:Endpoint`, `DeploymentName`, and `ApiKey` in [appsettings.json](src/appsettings.json). Use your own resource and compatible model deployment. The orchestrator calls `/openai/v1/responses`; it does not read an `ApiVersion` setting. |
+| Agent identity and permissions | Your tenant and agent blueprint, `Connections:ServiceConnection:Settings`, and `TokenValidation`. Identity creation and consent are live setup steps, not part of building the sample. |
+| Available tools | [ToolingManifest.json](src/ToolingManifest.json) declares Mail and Teams as well as Windows 365 computer use. Review which capabilities you need and arrange the corresponding permissions; editing the manifest alone does not grant access. Published service audiences/scopes are not your tenant or blueprint IDs. |
+| Classic Teams identity and branding | [appPackage/manifest.json](src/appPackage/manifest.json) is the checked-in classic Teams template, not the A365 publishing input. Review its app and bot IDs, names, developer information, domains, privacy/terms URLs, and referenced icons only for that packaging path. |
+| A365 package identity and branding | The generated `<deploymentProjectPath>/manifest/manifest.json` and icons in the same directory are the A365 publishing inputs. Customize names, descriptions, developer information, privacy/terms URLs, and icons there; the CLI stamps identity fields from your configured blueprint. |
+| Optional Watch live viewer | `Screenshare:PublicBaseUrl`, `Screenshare:AllowedTenantIds`, and `AzureAd` in [appsettings.json](src/appsettings.json). The empty tenant allowlist disables card offers; setting it does not make the viewer a general multi-tenant application. |
+
+For the pinned Agent 365 CLI **2.0.1**, `a365 publish` resolves
+`deploymentProjectPath` relative to the CLI's working directory and uses its
+`manifest` subdirectory. With the templates' `"deploymentProjectPath": "."` and
+the CLI run from `src`, this is `src/manifest/manifest.json`. If the directory is
+absent, the CLI extracts embedded templates there. During an explicitly authorized
+interactive publish, use its edit prompt to review and customize that manifest
+and its icons before continuing to create `manifest/manifest.zip`.
+Edits to `src/appPackage/manifest.json` are not copied into that A365 package.
+See the [pinned CLI's publishing implementation](https://github.com/microsoft/Agent365-devTools/blob/v2.0.1/src/Microsoft.Agents.A365.DevTools.Cli/Commands/PublishCommand.cs#L187-L273).
+
+Keep local credentials in .NET user secrets and deployed credentials in environment
+or hosting settings, not source files. Configuration keys use `:` in user secrets
+and `__` in environment variables. See [Quick start](#quick-start) for model settings.
+
+Both [appsettings.json](src/appsettings.json) and
+[launchSettings.json](src/Properties/launchSettings.json) are **tracked** templates:
+ignore rules do not protect edits to them. Keep committed placeholders intact and
+review any files changed by setup tooling before committing. Never commit real
+API keys, client secrets, or bearer tokens.
+
+### 5. Treat live validation and deployment separately
+
+Live model requests, Teams messaging, MCP permissions, and Cloud PC operations need
+your configured services and can consume resources or affect real data. Review and
+explicitly authorize each live setup or validation step before asking the coding
+agent to perform it. Follow the
+[setup tutorial](step-by-step-tutorial.md) with the
+[CLI compatibility caveats](#dependency-baseline-and-agent-365-sdk-20) in mind.
+The [platform documentation](../docs/) explains the identity and Cloud PC lifecycle.
+
+Before production use, enable incoming-token validation, keep development bypasses
+out of production, and review viewer access and telemetry redaction. Conversation
+state, per-user quotas, and screen-sharing tickets are in memory and reset on process
+restart; multiple instances need an appropriate shared-state design. This sample's
+local build/tests do not establish production readiness. A response from
+`/api/health` only establishes that the host responds, not that model or MCP access works.
 
 ## Quick start
 
-This gets the agent process running locally. To actually send it messages, you need the
-rest of the setup in [step-by-step-tutorial.md](step-by-step-tutorial.md).
+The following configures model access and launches the local development profile.
+It is not needed for build/tests and does not provision an identity, grant MCP
+permissions, or supply real development bearer tokens. For live tool use, complete
+the corresponding setup in [step-by-step-tutorial.md](step-by-step-tutorial.md),
+noting the [CLI compatibility caveats](#dependency-baseline-and-agent-365-sdk-20).
 
 ```powershell
-cd src
+# Start in W365A-Playground-Agent.
+Set-Location .\src
 
-# Local secrets (stay on your machine, never committed).
-# Non-secret config (Endpoint, DeploymentName, ApiVersion, TokenValidation:Enabled) is set in
-# src/appsettings.json (placeholders) and src/Properties/launchSettings.json (env vars).
+# Keep overrides local rather than changing tracked templates.
+dotnet user-secrets set "AIServices:AzureOpenAI:Endpoint" "https://<your-resource>.openai.azure.com"
+dotnet user-secrets set "AIServices:AzureOpenAI:DeploymentName" "<your-model-deployment>"
 dotnet user-secrets set "AIServices:AzureOpenAI:ApiKey" "<your-api-key>"
 
-# Before running: open src/appsettings.json. The <<…>> placeholders fall into 3 buckets:
-#   - <<agentBlueprintId>>, <<tenantId>>, <<Connections__ServiceConnection__Settings__ClientSecret>>
-#     → automatically stamped by 'a365 setup all'.
-#     Never commit the real ClientSecret; restore the <<…>> placeholder before 'git commit'.
-#   - <<AIServices__AzureOpenAI__ApiKey>>
-#     → resolved from the user-secret you just set. Leave as <<…>>.
-# Additionally: AIServices:AzureOpenAI ships with Microsoft demo DeploymentName/Endpoint/
-# ApiVersion. If you have your own Azure OpenAI resource, replace those three.
-
-# Run (uses the DevelopmentMode profile in Properties/launchSettings.json)
+# Only run when ready to use your configured services.
 dotnet run --launch-profile DevelopmentMode
 ```
+
+The checked-in model settings are placeholders, not a shared demo deployment.
+The orchestrator uses the v1 Responses API and does not need an `ApiVersion` setting.
+The launch profile supplies placeholder bearer-token environment variables, not
+working credentials.
 
 The agent listens on `http://localhost:3978/api/messages`.
 
@@ -142,7 +286,10 @@ dotnet tool run a365 --version
 CLI 2.0.1 manages agent setup and packaging, not Azure hosting deployment. The
 step-by-step tutorial was written for an older CLI; consult the
 [current command reference](https://learn.microsoft.com/microsoft-agent-365/developer/reference/cli/setup)
-for current setup and permission commands.
+for current setup and permission commands. Its older configuration examples also
+refer to demo model values and an `ApiVersion` setting; use the current
+[appsettings.json](src/appsettings.json) and [Quick start](#quick-start) above as the
+model-configuration reference.
 
 ## Conversation-state retention
 
@@ -175,9 +322,11 @@ See [step-by-step-tutorial.md → Throttling — operational notes](step-by-step
 ```
 W365A-Playground-Agent/
 ├── README.md                          ← you are here
+├── AGENTS.md                          ← coding-agent commands and boundaries
 ├── step-by-step-tutorial.md           ← step-by-step setup, deploy, troubleshoot
 ├── LICENSE                            ← MIT (sample code)
 ├── W365APlaygroundAgent.sln
+├── tests/                            ← xUnit regression tests (not in the solution)
 ├── .gitignore                         ← C#-specific ignore rules
 └── src/
     ├── W365APlaygroundAgent.csproj
@@ -185,6 +334,7 @@ W365A-Playground-Agent/
     ├── Agent/PlaygroundAgent.cs       ← agent logic
     ├── Auth/                          ← JWT validation
     ├── ComputerUse/                   ← Responses API + screenshot forwarding
+    ├── Screenshare/                   ← Watch live cards, viewer, and tickets
     ├── Throttling/                    ← per-user turn quota + global HTTP rate limit
     ├── Telemetry/                     ← OpenTelemetry + A365 observability
     ├── Properties/launchSettings.json ← <<PLACEHOLDER>> values (force-tracked)
