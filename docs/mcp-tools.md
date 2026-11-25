@@ -34,11 +34,28 @@ Every Computer-Use session starts with `mcp_W365ComputerUse_StartSession` and sh
 
 ### `mcp_W365ComputerUse_StartSession`
 
-Starts a Windows 365 Computer Use session, establishing a connection to a Cloud PC and allocating a Cloud PC resource. Returns the `sessionId` used to manage the session.
+Starts a W365 Computer Use session and returns a `sessionId`. Always call this tool first before any remote W365 operation. Pass the returned `sessionId` to every remote tool call and to `mcp_W365ComputerUse_EndSession` when done.
 
-No required parameters.
+No required parameters. Omit `sessionKind` unless a specific kind is required; it is not available in every environment. Omitting it starts the default session.
 
-**Returns:** JSON including `sessionId` (and, on start, a screen-share URL for [Computer-See](./screen-sharing.md)).
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `sessionKind` | string | No | Default session | `local`: any user, no auxiliary authorization. `human`: human users; forwards the caller's `x-ms-authorization-auxiliary` header if supplied. `agentic`: agent users. `null` is rejected. |
+| `sessionProperties` | object | No | - | Optional properties, with or without `sessionKind`. The named properties below are validated and forwarded to W365; up to 10 other properties are passed through unchanged. |
+
+**`sessionProperties`:**
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `displayWidth` | integer | Optional display width in pixels; must be positive. |
+| `displayHeight` | integer | Optional display height in pixels; must be positive. |
+| `browserMode` | string | Optional browser mode: `chromium` or `legacy`. |
+| `mcpProtocolVersion` | string | `2.0` requests MCP v2 tools and `w365://` resources. `1.0` or omission uses the pool protocol. The response reports the resolved version as `mcpProtocolVersion`; missing response metadata defaults to `1.0`. |
+| `poolId` | string | Optional assigned pool ID, not an allocated `sessionId`. Requires an explicit `sessionKind` for v3 checkout. Queries only this pool for the caller, without listing pools or falling back to another pool. ATG determines whether a free session is available. Must contain a non-whitespace character and be at most 256 characters. |
+
+Property names must start with a letter and contain only letters, digits, or underscores, with at most 64 characters. Additional property values must be strings of at most 256 characters, numbers, or booleans, with at most 2048 bytes in total. `sessionProperties` accepts at most 15 properties.
+
+**Returns:** JSON including `sessionId` and a session link for [Computer-See](./screen-sharing.md). A `human` session returns `awaitingHumanLogin` with a `connectivityUrl` that the human must open to sign in promptly before remote tools work.
 
 ### `mcp_W365ComputerUse_GetSessionDetails`
 
