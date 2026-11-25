@@ -53,8 +53,6 @@ No required parameters. Omit `sessionKind` unless a specific kind is required; i
 | `mcpProtocolVersion` | string | `2.0` requests MCP v2 tools and `w365://` resources. `1.0` or omission uses the pool protocol. The response reports the resolved version as `mcpProtocolVersion`; missing response metadata defaults to `1.0`. |
 | `poolId` | string | Optional assigned pool ID, not an allocated `sessionId`. Requires an explicit `sessionKind` for v3 checkout. Queries only this pool for the caller, without listing pools or falling back to another pool. ATG determines whether a free session is available. Must contain a non-whitespace character and be at most 256 characters. |
 
-Property names must start with a letter and contain only letters, digits, or underscores, with at most 64 characters. Additional property values must be strings of at most 256 characters, numbers, or booleans, with at most 2048 bytes in total. `sessionProperties` accepts at most 15 properties.
-
 **Returns:** JSON including `sessionId` and a session link for [Computer-See](./screen-sharing.md). A `human` session returns `awaitingHumanLogin` with a `connectivityUrl` that the human must open to sign in promptly before remote tools work.
 
 ### `mcp_W365ComputerUse_GetSessionDetails`
